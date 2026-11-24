@@ -6,6 +6,10 @@ import org.json.JSONObject
 
 enum class ServerKind { JSON, EMBED }
 
+enum class KeyType { TMDB, IMDB, TITLE }
+
+enum class ServerSpeed { VERY_FAST, FAST, NORMAL, SLOW }
+
 data class ServerSpec(
     val id: String,
     val name: String,
@@ -13,56 +17,161 @@ data class ServerSpec(
     val tvUrl: String,
     val referer: String? = null,
     val kind: ServerKind = ServerKind.EMBED,
+    val keyType: KeyType = KeyType.TMDB,
     val timeoutSec: Int = 15,
     val headers: Map<String, String> = emptyMap(),
     val note: String = "",
     val defaultEnabled: Boolean = true,
-)
+    val animeOnly: Boolean = false,
+    val speed: ServerSpeed = ServerSpeed.NORMAL,
+    val supports4k: Boolean = false,
+    val hasSubtitles: Boolean = false,
+) {
+    val supportsTv: Boolean get() = tvUrl.isNotBlank()
+}
 
 object ServerFarm {
 
     val all: List<ServerSpec> = listOf(
         ServerSpec(
+            id = "vidy", name = "Vidy",
+            movieUrl = "https://www.vidy.st/movie/{id}?color=DC2626",
+            tvUrl = "https://www.vidy.st/tv/{id}/{season}/{episode}?color=DC2626",
+            referer = "https://www.vidy.st/", kind = ServerKind.JSON,
+            timeoutSec = 35, note = "Multi-audio", speed = ServerSpeed.NORMAL,
+            supports4k = true,
+        ),
+        ServerSpec(
             id = "vidbolt", name = "VidBolt",
             movieUrl = "https://vidbolt.xyz/api/resolve?type=movie&id={id}",
             tvUrl = "https://vidbolt.xyz/api/resolve?type=tv&id={id}&season={season}&episode={episode}",
             referer = "https://vidbolt.xyz/", kind = ServerKind.JSON,
-            timeoutSec = 20, note = "API",
-        ),
-        ServerSpec(
-            id = "vidrift", name = "Vidrift",
-            movieUrl = "https://embed.vidrift.net/embed/movie/{id}",
-            tvUrl = "https://embed.vidrift.net/embed/tv/{id}/{season}/{episode}",
-            referer = "https://embed.vidrift.net/", kind = ServerKind.EMBED,
-            timeoutSec = 15, note = "Embed",
+            timeoutSec = 25, note = "API", speed = ServerSpeed.FAST,
         ),
         ServerSpec(
             id = "vidly", name = "Vidly",
             movieUrl = "https://vidly.pro/embed/movie/{id}",
             tvUrl = "https://vidly.pro/embed/tv/{id}/{season}/{episode}",
             referer = "https://vidly.pro/", kind = ServerKind.EMBED,
-            timeoutSec = 15, note = "HLS",
+            timeoutSec = 25, note = "HLS", speed = ServerSpeed.FAST,
         ),
         ServerSpec(
-            id = "bingr", name = "Bingr",
-            movieUrl = "https://bingr.one/watch/movie/{id}",
-            tvUrl = "https://bingr.one/watch/tv/{id}/{season}/{episode}",
-            referer = "https://bingr.one/", kind = ServerKind.EMBED,
-            timeoutSec = 15, note = "HLS",
+            id = "vidlink", name = "VidLink",
+            movieUrl = "https://vidlink.pro/api/b/movie/{id}?multiLang=1",
+            tvUrl = "https://vidlink.pro/api/b/tv/{id}/{season}/{episode}?multiLang=1",
+            referer = "https://vidlink.pro/", kind = ServerKind.JSON,
+            timeoutSec = 25, note = "Multi-lang", speed = ServerSpeed.VERY_FAST,
+            supports4k = true, hasSubtitles = true,
+        ),
+        ServerSpec(
+            id = "moviebox", name = "MovieBox",
+            movieUrl = "https://h5-api.aoneroom.com/wefeed-h5api-bff/app/get-latest-app-pkgs?app_name=moviebox",
+            tvUrl = "https://h5-api.aoneroom.com/wefeed-h5api-bff/app/get-latest-app-pkgs?app_name=moviebox",
+            referer = "https://movieboxonline.net/", kind = ServerKind.JSON, keyType = KeyType.TITLE,
+            timeoutSec = 60, note = "Catalog API", speed = ServerSpeed.FAST,
+            supports4k = true, hasSubtitles = true,
         ),
         ServerSpec(
             id = "netmirror", name = "NetMirror",
             movieUrl = "https://net78.cc/api/embed-tmdb/{id}?type=movie",
             tvUrl = "https://net78.cc/api/embed-tmdb/{id}?type=tv&se={season}&ep={episode}",
             referer = "https://net78.cc/", kind = ServerKind.JSON,
-            timeoutSec = 20, note = "API",
+            timeoutSec = 40, note = "API", speed = ServerSpeed.FAST,
+            hasSubtitles = true,
+        ),
+        ServerSpec(
+            id = "bingr", name = "Bingr",
+            movieUrl = "https://bingr.one/watch/movie/{id}",
+            tvUrl = "https://bingr.one/watch/tv/{id}/{season}/{episode}",
+            referer = "https://bingr.one/", kind = ServerKind.EMBED,
+            timeoutSec = 30, note = "HLS", speed = ServerSpeed.FAST,
+        ),
+        ServerSpec(
+            id = "vidrift", name = "Vidrift",
+            movieUrl = "https://embed.vidrift.net/embed/movie/{id}",
+            tvUrl = "https://embed.vidrift.net/embed/tv/{id}/{season}/{episode}",
+            referer = "https://embed.vidrift.net/", kind = ServerKind.EMBED,
+            timeoutSec = 25, note = "Embed", speed = ServerSpeed.FAST,
+            hasSubtitles = true,
+        ),
+        ServerSpec(
+            id = "movy", name = "Movy",
+            movieUrl = "https://api.wecollege.net/seed?mediaId={id}",
+            tvUrl = "https://api.wecollege.net/seed?mediaId={id}",
+            referer = "https://www.movy.sx/", kind = ServerKind.JSON,
+            timeoutSec = 25, note = "Encrypted API", speed = ServerSpeed.FAST,
+            supports4k = true,
         ),
         ServerSpec(
             id = "atlantic", name = "Atlantic",
             movieUrl = "https://zcdn.bluevelvet.space/cdn?tmdb={id}&type=movie",
             tvUrl = "https://zcdn.bluevelvet.space/cdn?tmdb={id}&type=tv&season={season}&episode={episode}",
             referer = "https://atlantic.st/", kind = ServerKind.JSON,
-            timeoutSec = 15, note = "API", defaultEnabled = false,
+            timeoutSec = 30, note = "Fast CDN", speed = ServerSpeed.VERY_FAST,
+        ),
+        ServerSpec(
+            id = "4khdhub", name = "4KHDHub",
+            movieUrl = "https://4khdhub.one/?s={title}",
+            tvUrl = "https://4khdhub.one/?s={title}",
+            referer = "https://4khdhub.one/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
+            timeoutSec = 45, note = "4K files", defaultEnabled = false,
+            speed = ServerSpeed.SLOW, supports4k = true,
+        ),
+        ServerSpec(
+            id = "fsl", name = "FSL",
+            movieUrl = "https://vegamovies.latino/?s={title}",
+            tvUrl = "https://vegamovies.latino/?s={title}",
+            referer = "https://vegamovies.latino/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
+            timeoutSec = 45, note = "File index", defaultEnabled = false,
+            speed = ServerSpeed.SLOW, supports4k = true,
+        ),
+        ServerSpec(
+            id = "hindmoviez", name = "HindMoviez",
+            movieUrl = "https://hindmovie.one/?s={title}",
+            tvUrl = "https://hindmovie.one/?s={title}",
+            referer = "https://hindmovie.one/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
+            timeoutSec = 45, note = "File index", defaultEnabled = false,
+            speed = ServerSpeed.SLOW,
+        ),
+        ServerSpec(
+            id = "hdhub4u", name = "HDHub4u",
+            movieUrl = "https://new8.hdhub4u.cl/search/{title}/",
+            tvUrl = "https://new8.hdhub4u.cl/search/{title}/",
+            referer = "https://new8.hdhub4u.cl/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
+            timeoutSec = 45, note = "File index", defaultEnabled = false,
+            speed = ServerSpeed.SLOW, supports4k = true,
+        ),
+        ServerSpec(
+            id = "moviesdrive", name = "MoviesDrive",
+            movieUrl = "https://new3.moviesdrive.beer/search/{title}/",
+            tvUrl = "https://new3.moviesdrive.beer/search/{title}/",
+            referer = "https://new3.moviesdrive.beer/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
+            timeoutSec = 45, note = "File index", defaultEnabled = false,
+            speed = ServerSpeed.SLOW,
+        ),
+        ServerSpec(
+            id = "movies4u", name = "Movies4u",
+            movieUrl = "https://new8.movies4u.garden/lookup.php?q={title}",
+            tvUrl = "https://new8.movies4u.garden/lookup.php?q={title}",
+            referer = "https://new8.movies4u.garden/", kind = ServerKind.JSON, keyType = KeyType.TITLE,
+            timeoutSec = 45, note = "File index", defaultEnabled = false,
+            speed = ServerSpeed.SLOW, supports4k = true,
+        ),
+        ServerSpec(
+            id = "animeworld", name = "AnimeWorld",
+            movieUrl = "https://watchanimeworld.one/?s={title}",
+            tvUrl = "https://watchanimeworld.one/?s={title}",
+            referer = "https://watchanimeworld.one/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
+            timeoutSec = 40, note = "Anime", animeOnly = true,
+            speed = ServerSpeed.NORMAL,
+        ),
+        ServerSpec(
+            id = "hianime", name = "HiAnime",
+            movieUrl = "https://hianime.at/search?keyword={title}",
+            tvUrl = "https://hianime.at/search?keyword={title}",
+            referer = "https://hianime.at/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
+            timeoutSec = 40, note = "Anime", animeOnly = true,
+            speed = ServerSpeed.NORMAL,
         ),
     )
 
@@ -73,12 +182,17 @@ object ServerFarm {
 
     fun urlFor(spec: ServerSpec, request: LinkRequest): String? {
         val template = if (request.isMovie) spec.movieUrl else spec.tvUrl
+        val key = when (spec.keyType) {
+            KeyType.TMDB -> request.tmdbId.takeIf { it > 0 }?.toString()
+            KeyType.IMDB -> request.imdbId?.takeIf { it.startsWith("tt") }
+            KeyType.TITLE -> request.title.takeIf { it.isNotBlank() }
+        } ?: return null
         val url = template
-            .replace("{id}", request.tmdbId.toString())
+            .replace("{id}", URLEncoder.encode(key, "UTF-8"))
             .replace("{imdb}", request.imdbId.orEmpty())
             .replace("{season}", request.season.toString())
             .replace("{episode}", request.episode.toString())
-            .replace("{title}", URLEncoder.encode(request.title, "UTF-8"))
+            .replace("{title}", URLEncoder.encode(request.title, "UTF-8").replace("+", "%20"))
             .replace("{year}", request.year?.toString().orEmpty())
         return url.takeIf { it.isNotBlank() }
     }
@@ -93,12 +207,20 @@ class BuiltinServerSource(private val spec: ServerSpec) : StreamSource {
     override suspend fun resolve(request: LinkRequest): List<Candidate> {
         val started = System.currentTimeMillis()
         val items = when (spec.id) {
+            "vidy" -> Vidy.resolve(spec, request)
             "vidbolt" -> VidBolt.resolve(spec, request)
-            "vidrift" -> Vidrift.resolve(spec, request)
             "vidly" -> Vidly.resolve(spec, request)
-            "bingr" -> Bingr.resolve(spec, request)
+            "vidlink" -> VidLink.resolve(spec, request)
+            "moviebox" -> MovieBox.resolve(spec, request)
             "netmirror" -> NetMirror.resolve(spec, request)
+            "bingr" -> Bingr.resolve(spec, request)
+            "vidrift" -> Vidrift.resolve(spec, request)
+            "movy" -> Movy.resolve(spec, request)
             "atlantic" -> Atlantic.resolve(spec, request)
+            "4khdhub", "fsl", "hindmoviez", "hdhub4u", "moviesdrive" -> FileIndex.resolve(spec, request)
+            "movies4u" -> Movies4u.resolve(spec, request)
+            "animeworld" -> AnimeWorld.resolve(spec, request)
+            "hianime" -> HiAnime.resolve(spec, request)
             else -> if (spec.kind == ServerKind.JSON) {
                 JsonResolver.resolve(spec, request)
             } else {
@@ -155,6 +277,7 @@ private object JsonResolver {
                 qualityHint = hit.quality,
                 audioLabel = Naming.displayLabel(hit.language, request.originalLanguage),
                 sizeLabel = hit.size,
+                mediaLabel = hit.label,
             )
         }
     }
@@ -224,6 +347,7 @@ private object VidBolt {
                 qualityHint = quality,
                 audioLabel = audio,
                 sizeLabel = Naming.sizeLabel(label),
+                mediaLabel = label,
                 inlineManifest = master,
                 subtitles = info.subtitles,
             )
@@ -282,6 +406,7 @@ private object Vidrift {
                 headers = mapOf("Referer" to "$ORIGIN/"),
                 qualityHint = height,
                 audioLabel = audioLabel(name, request.originalLanguage),
+                mediaLabel = name,
                 inlineManifest = master,
                 subtitles = info.subtitles,
             )
@@ -343,6 +468,7 @@ private object Vidrift {
                     headers = mapOf("Referer" to "$ORIGIN/"),
                     qualityHint = height,
                     audioLabel = audioLabel(o.optString("name"), request.originalLanguage),
+                    mediaLabel = o.optString("name"),
                 )
             }
         }

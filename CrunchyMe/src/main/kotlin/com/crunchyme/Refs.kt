@@ -29,6 +29,16 @@ object Refs {
     fun episode(tmdbId: Int, imdbId: String?, season: Int, episode: Int): String =
         "https://www.themoviedb.org/tv/$tmdbId/season/$season/episode/$episode" + imdbSuffix(imdbId)
 
+    fun imdb(imdbId: String, type: String, season: Int = -1, episode: Int = -1): String {
+        val id = imdbId.trim()
+        val base = "https://www.imdb.com/title/$id"
+        return if (type == "tv" && season > 0 && episode > 0) {
+            "$base/season/$season/episode/$episode?type=tv"
+        } else {
+            "$base?type=" + if (type == "tv") "tv" else "movie"
+        }
+    }
+
     private fun imdbSuffix(imdbId: String?): String =
         imdbId?.trim()?.takeIf { it.startsWith("tt") }?.let { "?imdb=$it" }.orEmpty()
 

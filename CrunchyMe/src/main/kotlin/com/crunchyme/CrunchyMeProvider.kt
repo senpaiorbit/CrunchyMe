@@ -65,18 +65,33 @@ class CrunchyMeProvider : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse>? {
-        if (!Tmdb.hasKey() || query.isBlank()) return null
-        val items = Tmdb.search(query) ?: return null
-        return items.mapNotNull { it.toCard() }.takeIf { it.isNotEmpty() }
+        if (query.isBlank()) return null
+        val tmdb = if (Tmdb.hasKey()) Tmdb.search(query) else null
+        if (!tmdb.isNullOrEmpty()) {
+            return tmdb.mapNotNull { it.toCard() }.takeIf { it.isNotEmpty() }
+        }
+        val imdb = Omdb.search(query)
+        return imdb.mapNotNull { it.toCard() }.takeIf { it.isNotEmpty() }
     }
 
     override suspend fun quickSearch(query: String): List<SearchResponse>? = search(query)
 
     override suspend fun load(url: String): LoadResponse? {
         val ref = Refs.parse(url) ?: return null
-        val id = ref.tmdbId ?: return null
-        val detail = Tmdb.detail(id, ref.type) ?: return null
+        val tmdbDetail = ref.tmdbId?.takeIf { Tmdb.hasKey() }?.let { Tmdb.detail(it, ref.type) }
+        if (tmdbDetail != null) return tmdbLoad(url, ref, tmdbDetail)
 
+        val imdbId = ref.imdbId ?: return null
+        val omdb = Omdb.detail(imdbId) ?: return null
+        return omdbLoad(url, omdb)
+    }
+
+    private suspend fun tmdbLoad(
+        url: String,
+        ref: TitleRef,
+        detail: Tmdb.Detail,
+    ): LoadResponse? {
+        val id = detail.id
         val dataUrl = if (ref.type == "movie") {
             Refs.movie(id, detail.imdbId)
         } else {
@@ -125,6 +140,47 @@ class CrunchyMeProvider : MainAPI() {
         }
     }
 
+    private suspend fun omdbLoad(url: String, detail: Omdb.Detail): LoadResponse? {
+        val dataUrl = Refs.imdb(detail.imdbId, detail.type)
+        val cast = detail.actors.map { ActorData(Actor(it, null)) }
+        if (detail.type == "movie") {
+            return newMovieLoadResponse(detail.title, url, TvType.Movie, dataUrl) {
+                posterUrl = detail.poster
+                backgroundPosterUrl = detail.poster
+                year = detail.year
+                plot = detail.overview
+                tags = detail.genres
+                actors = cast
+                duration = detail.runtime
+                addImdbId(detail.imdbId)
+                detail.score?.takeIf { it > 0 }?.let { addScore(it.toString(), 10) }
+            }
+        }
+
+        val episodes = Omdb.episodes(detail.imdbId)
+        if (episodes.isEmpty()) return null
+        val episodeList = episodes.map { ep ->
+            newEpisode(Refs.imdb(detail.imdbId, "tv", ep.season, ep.number)) {
+                name = ep.name ?: "Episode ${ep.number}"
+                season = ep.season
+                episode = ep.number
+                ep.rating?.takeIf { it > 0 }?.let { score = Score.from10(it) }
+                ep.airDate?.let { date -> runCatching { addDate(date) } }
+            }
+        }
+        return newTvSeriesLoadResponse(detail.title, url, TvType.TvSeries, episodeList) {
+            posterUrl = detail.poster
+            backgroundPosterUrl = detail.poster
+            year = detail.year
+            plot = detail.overview
+            tags = detail.genres
+            actors = cast
+            duration = detail.runtime
+            addImdbId(detail.imdbId)
+            detail.score?.takeIf { it > 0 }?.let { addScore(it.toString(), 10) }
+        }
+    }
+
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -132,26 +188,32 @@ class CrunchyMeProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit,
     ): Boolean {
         val ref = Refs.parse(data) ?: return false
-        val id = ref.tmdbId ?: return false
-        if (ref.type == "tv" && (ref.season <= 0 || ref.episode <= 0)) {
+        var tmdbId = ref.tmdbId ?: 0
+        if (tmdbId <= 0 && ref.imdbId != null && Tmdb.hasKey()) {
+            tmdbId = Tmdb.findByImdb(ref.imdbId)?.id ?: 0
+        }
+        val tmdbDetail = tmdbId.takeIf { it > 0 && Tmdb.hasKey() }?.let { Tmdb.detail(it, ref.type) }
+        val omdbDetail = if (tmdbDetail == null && ref.imdbId != null) Omdb.detail(ref.imdbId) else null
+        val mediaType = omdbDetail?.type ?: ref.type
+        val imdbId = tmdbDetail?.imdbId ?: ref.imdbId
+        if (mediaType == "tv" && (ref.season <= 0 || ref.episode <= 0)) {
             Logx.w("CrunchyMe", "tv request without season/episode")
             return false
         }
-        if (!Tmdb.hasKey()) {
-            Logx.w("CrunchyMe", "no TMDB key configured")
+        val title = tmdbDetail?.title ?: omdbDetail?.title ?: run {
+            Logx.w("CrunchyMe", "no metadata for $data")
             return false
         }
 
-        val detail = Tmdb.detail(id, ref.type) ?: return false
         val request = LinkRequest(
-            tmdbId = id,
-            imdbId = detail.imdbId ?: ref.imdbId,
-            type = ref.type,
-            season = if (ref.type == "tv") ref.season else -1,
-            episode = if (ref.type == "tv") ref.episode else -1,
-            title = detail.title,
-            year = detail.year,
-            originalLanguage = detail.originalLanguage,
+            tmdbId = tmdbId,
+            imdbId = imdbId,
+            type = mediaType,
+            season = if (mediaType == "tv") ref.season else -1,
+            episode = if (mediaType == "tv") ref.episode else -1,
+            title = title,
+            year = tmdbDetail?.year ?: omdbDetail?.year,
+            originalLanguage = tmdbDetail?.originalLanguage,
         )
 
         val floor = Settings.qualityFloor()
@@ -164,7 +226,7 @@ class CrunchyMeProvider : MainAPI() {
         }
 
         if (items.isEmpty()) {
-            Logx.w("CrunchyMe", "no playable streams for ${detail.title}")
+            Logx.w("CrunchyMe", "no playable streams for $title")
             return false
         }
 
@@ -179,12 +241,23 @@ class CrunchyMeProvider : MainAPI() {
                 MediaKind.DASH -> ExtractorLinkType.DASH
                 MediaKind.FILE -> ExtractorLinkType.VIDEO
             }
-            val label = Naming.linkLabel(candidate.qualityHint, candidate.audioLabel, candidate.sizeLabel)
-                .ifBlank { candidate.sourceName }
+            val label = Naming.displayName(
+                serverName = candidate.sourceName,
+                audioLabel = candidate.audioLabel,
+                sizeLabel = candidate.sizeLabel,
+                mediaLabel = candidate.mediaLabel,
+                originalLanguage = request.originalLanguage,
+            )
+            val sourceLabel = Naming.priorityName(
+                serverName = candidate.sourceName,
+                audioLabel = candidate.audioLabel,
+                mediaLabel = candidate.mediaLabel,
+                originalLanguage = request.originalLanguage,
+            )
 
             callback(
                 newExtractorLink(
-                    source = candidate.sourceName,
+                    source = sourceLabel,
                     name = label,
                     url = candidate.url,
                     type = type,
@@ -232,6 +305,21 @@ class CrunchyMeProvider : MainAPI() {
                         .thenBy { it.sourceName },
                 )
         }
+
+    private fun Omdb.Hit.toCard(): SearchResponse {
+        val url = Refs.imdb(imdbId, type)
+        return if (type == "movie") {
+            newMovieSearchResponse(title, url, TvType.Movie) {
+                posterUrl = this@toCard.poster
+                year = this@toCard.year
+            }
+        } else {
+            newTvSeriesSearchResponse(title, url, TvType.TvSeries) {
+                posterUrl = this@toCard.poster
+                year = this@toCard.year
+            }
+        }
+    }
 
     private fun Tmdb.Item.toCard(): SearchResponse? {
         if (title.isBlank()) return null

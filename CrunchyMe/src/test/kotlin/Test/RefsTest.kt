@@ -43,6 +43,19 @@ class RefsTest {
     }
 
     @Test
+    fun imdbCatalogUrlsRoundTrip() {
+        val movie = Refs.parse(Refs.imdb("tt1375666", "movie"))!!
+        assertEquals("tt1375666", movie.imdbId)
+        assertEquals("movie", movie.type)
+        assertNull(movie.tmdbId)
+
+        val episode = Refs.parse(Refs.imdb("tt0944947", "tv", 2, 5))!!
+        assertEquals("tv", episode.type)
+        assertEquals(2, episode.season)
+        assertEquals(5, episode.episode)
+    }
+
+    @Test
     fun unrelatedUrlIsRejected() {
         assertNull(Refs.parse("https://example.com/watch/123"))
         assertNull(Refs.parse(""))

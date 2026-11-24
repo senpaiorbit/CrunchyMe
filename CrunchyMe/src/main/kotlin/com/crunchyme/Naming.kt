@@ -188,9 +188,179 @@ object Naming {
         return "${match.groupValues[1]} $unit"
     }
 
+    fun bytesLabel(bytes: Long): String = when {
+        bytes >= 1_000_000_000L -> String.format(java.util.Locale.US, "%.1f GB", bytes / 1_000_000_000.0)
+        bytes >= 1_000_000L -> String.format(java.util.Locale.US, "%.0f MB", bytes / 1_000_000.0)
+        else -> ""
+    }
+
     fun linkLabel(height: Int, audio: String, size: String): String = listOf(
         qualityName(height),
         audio.trim(),
         size.trim(),
     ).filter { it.isNotBlank() }.joinToString(" · ")
+
+    private val COUNTRY: Map<String, String> = mapOf(
+        "Hindi" to "IN", "Bengali" to "BD", "Tamil" to "IN", "Telugu" to "IN",
+        "Malayalam" to "IN", "Kannada" to "IN", "Marathi" to "IN", "Punjabi" to "IN",
+        "Gujarati" to "IN", "Urdu" to "PK", "Nepali" to "NP", "Sinhala" to "LK",
+        "Assamese" to "IN", "Odia" to "IN", "Bhojpuri" to "IN", "English" to "GB",
+        "Arabic" to "SA", "Russian" to "RU", "Chinese" to "CN", "Japanese" to "JP",
+        "Korean" to "KR", "French" to "FR", "Spanish" to "ES", "Portuguese" to "PT",
+        "German" to "DE", "Italian" to "IT", "Dutch" to "NL", "Polish" to "PL",
+        "Turkish" to "TR", "Thai" to "TH", "Vietnamese" to "VN", "Indonesian" to "ID",
+        "Malay" to "MY", "Filipino" to "PH", "Swedish" to "SE", "Norwegian" to "NO",
+        "Danish" to "DK", "Finnish" to "FI", "Czech" to "CZ", "Slovak" to "SK",
+        "Hungarian" to "HU", "Romanian" to "RO", "Bulgarian" to "BG", "Greek" to "GR",
+        "Hebrew" to "IL", "Persian" to "IR", "Ukrainian" to "UA", "Serbian" to "RS",
+        "Croatian" to "HR", "Albanian" to "AL", "Georgian" to "GE", "Armenian" to "AM",
+        "Kazakh" to "KZ", "Swahili" to "KE", "Afrikaans" to "ZA", "Amharic" to "ET",
+        "Pashto" to "AF", "Kurdish" to "IQ", "Latin" to "VA", "Catalan" to "AD",
+        "Basque" to "ES", "Galician" to "ES", "Belarusian" to "BY", "Macedonian" to "MK",
+    )
+
+    private fun flag(country: String): String =
+        country.uppercase().map { Character.toChars(0x1F1E6 + (it - 'A')).concatToString() }.joinToString("")
+
+    fun languageFlag(language: String?): String {
+        val name = language?.trim().orEmpty()
+        val canonical = if (name in COUNTRY) name else labelOf(name)
+        return COUNTRY[canonical]?.let(::flag).orEmpty()
+    }
+
+    private val RESOLUTION = Regex("""\b\d{3,4}\s*p(?:\d{2,3})?\b|\b[24]\s*k\b|\b(?:FHD|UHD|QHD)\b|\bHD\b""", RegexOption.IGNORE_CASE)
+    private val SIZE_WORD = Regex("""\b\d+(?:\.\d+)?\s?(?:GB|MB)\b""", RegexOption.IGNORE_CASE)
+    private val MULTI = Regex("""(?i)\b(?:multi|dual|both)(?:\s*-?\s*audio)?\b""")
+
+    private fun stripQuality(text: String): String =
+        RESOLUTION.replace(text, " ").replace(Regex("""\s+"""), " ").trim()
+
+    private fun stripTrailingLanguage(text: String): String {
+        var out = text.trim()
+        val names = languages(out)
+        for (name in names) {
+            out = out.replace(Regex("""(?i)(?:\s*[(\[]?\s*${Regex.escape(name)}\s*[)\]]?\s*)$"""), " ").trim()
+        }
+        out = MULTI.replace(out, " ").trim()
+        return out.replace(Regex("""\s+"""), " ").trim()
+    }
+
+    private fun baseName(serverName: String): String {
+        var name = stripQuality(serverName)
+        name = stripTrailingLanguage(name)
+        return stripQuality(name).ifBlank { "Server" }
+    }
+
+    private fun displayLanguageNames(audioLabel: String?, mediaLabel: String?): List<String> {
+        val audio = languages(audioLabel)
+        val media = languages(mediaLabel)
+        return when {
+            audio.size >= 2 && audio.size >= media.size -> audio
+            media.size > audio.size -> media
+            audio.isNotEmpty() -> audio
+            else -> media
+        }
+    }
+
+    private fun ordered(names: List<String>, originalLanguage: String?): List<String> {
+        val anchor = labelOf(originalLanguage).takeIf { it.isNotBlank() }
+        val priority = listOfNotNull(anchor, "Hindi", "English")
+        val out = LinkedHashSet<String>()
+        priority.filter { it in names }.forEach { out += it }
+        names.forEach { out += it }
+        return out.toList()
+    }
+
+    private fun languageTagPart(
+        audioLabel: String?,
+        mediaLabel: String?,
+        originalLanguage: String?,
+    ): String {
+        val names = ordered(displayLanguageNames(audioLabel, mediaLabel), originalLanguage)
+        if (names.size > 3) return "(Multi)"
+        if (names.isEmpty()) {
+            val single = displayLabel(audioLabel, originalLanguage)
+                .ifBlank { displayLabel(mediaLabel, originalLanguage) }
+            return if (single.isBlank() || single == "Unknown") "(Unknown)" else "($single)"
+        }
+        val rendered = names.map { name ->
+            languageFlag(name).takeIf { it.isNotBlank() }?.let { "$it $name" } ?: name
+        }
+        return "(" + rendered.joinToString(", ") + ")"
+    }
+
+    private val TOKEN_PATTERNS: List<Pair<Regex, String>> = listOf(
+        Regex("""\bWEB[ \-]?DL\b""", RegexOption.IGNORE_CASE) to "WEB-DL",
+        Regex("""\bWEB[ \-]?RIP\b""", RegexOption.IGNORE_CASE) to "WEBRip",
+        Regex("""\bBLU[ \-]?RAY\b""", RegexOption.IGNORE_CASE) to "BluRay",
+        Regex("""\bBR[ \-]?RIP\b""", RegexOption.IGNORE_CASE) to "BRRip",
+        Regex("""\bHD[ \-]?RIP\b""", RegexOption.IGNORE_CASE) to "HDRip",
+        Regex("""\bDVD[ \-]?RIP\b""", RegexOption.IGNORE_CASE) to "DVDRip",
+        Regex("""\bHEVC\b|\bH\.?[ \-]?265\b|\bX\.?265\b""", RegexOption.IGNORE_CASE) to "HEVC",
+        Regex("""\bH\.?[ \-]?264\b|\bX\.?264\b|\bAVC\b""", RegexOption.IGNORE_CASE) to "H.264",
+        Regex("""\bAV1\b""", RegexOption.IGNORE_CASE) to "AV1",
+        Regex("""\bDOLBY[ \-]?VISION\b|\bDV\b""", RegexOption.IGNORE_CASE) to "Dolby Vision",
+        Regex("""\bHDR10\+(?!\d)""", RegexOption.IGNORE_CASE) to "HDR10+",
+        Regex("""\bHDR10\b""", RegexOption.IGNORE_CASE) to "HDR10",
+        Regex("""\bHDR\b""", RegexOption.IGNORE_CASE) to "HDR",
+        Regex("""\b10[ \-]?BIT\b""", RegexOption.IGNORE_CASE) to "10bit",
+        Regex("""\bDOLBY[ \-]?ATMOS\b|\bATMOS\b""", RegexOption.IGNORE_CASE) to "Dolby Atmos",
+        Regex("""\bTRUEHD\b""", RegexOption.IGNORE_CASE) to "TrueHD",
+        Regex("""\bDTS[ \-]?H[DI]\b""", RegexOption.IGNORE_CASE) to "DTS-HD",
+        Regex("""\bDTS\b""", RegexOption.IGNORE_CASE) to "DTS",
+        Regex("""\bAAC\b""", RegexOption.IGNORE_CASE) to "AAC",
+    )
+
+    fun renditionTokens(text: String?): List<String> {
+        val value = text?.trim().orEmpty()
+        if (value.isEmpty()) return emptyList()
+        val found = LinkedHashMap<String, String>()
+        for ((regex, label) in TOKEN_PATTERNS) {
+            if (regex.containsMatchIn(value)) found.putIfAbsent(label.lowercase(), label)
+        }
+        if (found.keys.any { it == "dolby vision" || it == "hdr10+" || it == "hdr10" }) {
+            found.remove("hdr")
+        }
+        return found.values.toList()
+    }
+
+    /** CloudStream renders the quality itself; keep the name free of a duplicate quality token. */
+    fun displayName(
+        serverName: String,
+        audioLabel: String = "",
+        sizeLabel: String = "",
+        mediaLabel: String = "",
+        originalLanguage: String? = null,
+    ): String {
+        val base = baseName(serverName)
+        val tokens = renditionTokens(listOf(mediaLabel, serverName).joinToString(" "))
+            .filterNot { token -> base.contains(token, ignoreCase = true) }
+            .joinToString(" ")
+        return listOf(base, tokens, languageTagPart(audioLabel, mediaLabel, originalLanguage), sizeLabel.trim())
+            .filter { it.isNotBlank() }
+            .joinToString(" ")
+    }
+
+    fun priorityName(
+        serverName: String,
+        audioLabel: String = "",
+        mediaLabel: String = "",
+        originalLanguage: String? = null,
+    ): String = listOf(
+        baseName(serverName),
+        languageTagPart(audioLabel, mediaLabel, originalLanguage),
+    ).filter { it.isNotBlank() }.joinToString(" ")
+
+    fun richerLanguageLabel(primary: String?, fallback: String?): String {
+        val first = languages(primary).size
+        val second = languages(fallback).size
+        return if (second > first) fallback.orEmpty().ifBlank { primary.orEmpty() }
+        else primary.orEmpty().ifBlank { fallback.orEmpty() }
+    }
+
+    fun canonicalSubtitleName(raw: String?): String {
+        val value = raw?.trim().orEmpty()
+        if (value.isBlank()) return "Subtitle"
+        return languages(value).firstOrNull() ?: value
+    }
 }

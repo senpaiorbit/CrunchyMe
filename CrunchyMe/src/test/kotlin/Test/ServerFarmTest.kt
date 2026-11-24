@@ -25,7 +25,19 @@ class ServerFarmTest {
     @Test
     fun serverIdsAreUnique() {
         val ids = ServerFarm.all.map { it.id }
+        assertEquals(18, ids.size)
         assertEquals(ids.size, ids.distinct().size)
+    }
+
+    @Test
+    fun titleKeyedProvidersUseTheTitle() {
+        val hdhub = ServerFarm.spec("hdhub4u")!!
+        assertEquals(
+            "https://new8.hdhub4u.cl/search/Inception/",
+            ServerFarm.urlFor(hdhub, movie),
+        )
+        val moviebox = ServerFarm.spec("moviebox")!!
+        assertTrue(ServerFarm.urlFor(moviebox, movie)!!.contains("app_name=moviebox"))
     }
 
     @Test
@@ -49,11 +61,11 @@ class ServerFarmTest {
     @Test
     fun defaultsEnableTheWorkingServers() {
         val defaults = ServerFarm.defaultEnabledIds()
-        assertTrue("vidbolt" in defaults)
-        assertTrue("vidrift" in defaults)
-        assertTrue("vidly" in defaults)
-        assertTrue("bingr" in defaults)
-        assertTrue("netmirror" in defaults)
-        assertFalse("atlantic" in defaults)
+        listOf(
+            "vidy", "vidbolt", "vidly", "vidlink", "moviebox", "netmirror",
+            "bingr", "vidrift", "movy", "atlantic", "animeworld", "hianime",
+        ).forEach { assertTrue(it in defaults, "expected $it to be on by default") }
+        listOf("4khdhub", "fsl", "hindmoviez", "hdhub4u", "moviesdrive", "movies4u")
+            .forEach { assertFalse(it in defaults) }
     }
 }

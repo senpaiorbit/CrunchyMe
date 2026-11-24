@@ -6,10 +6,12 @@ import android.content.SharedPreferences
 object Settings {
 
     const val TMDB_LINK = "https://www.themoviedb.org/settings/api"
+    const val OMDB_LINK = "https://www.omdbapi.com/apikey.aspx"
     const val DEFAULT_FLOOR = 720
 
     private const val PREFS = "crunchyme_settings"
     private const val KEY_TMDB = "tmdb_key"
+    private const val KEY_OMDB = "omdb_key"
     private const val KEY_FLOOR = "quality_floor"
     private const val KEY_ARCHIVE = "archive_enabled"
     private const val KEY_STREMIO = "stremio_enabled"
@@ -42,6 +44,21 @@ object Settings {
         val key = value.trim()
         return key.length >= 32 && !key.startsWith("eyJ")
     }
+
+    fun omdbKey(): String = prefs()
+        ?.getString(KEY_OMDB, null)
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?: Omdb.DEFAULT_KEY
+
+    fun saveOmdbKey(value: String) {
+        val key = value.trim()
+        prefs()?.edit()?.putString(KEY_OMDB, key.ifBlank { Omdb.DEFAULT_KEY })?.apply()
+        Omdb.clearCache()
+        LinkCache.clear()
+    }
+
+    fun isValidOmdbKey(value: String): Boolean = Regex("""^[A-Za-z0-9]{6,32}$""").matches(value.trim())
 
     fun qualityFloor(): Int = prefs()?.getInt(KEY_FLOOR, DEFAULT_FLOOR) ?: DEFAULT_FLOOR
 

@@ -13,8 +13,10 @@ import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.graphics.drawable.StateListDrawable
 import android.net.Uri
+import android.text.Editable
 import android.text.InputType
 import android.text.TextUtils
+import android.text.TextWatcher
 import android.text.method.PasswordTransformationMethod
 import android.util.TypedValue
 import android.view.Gravity
@@ -141,6 +143,7 @@ object SettingsUi {
                     ViewGroup.LayoutParams.MATCH_PARENT,
                 ),
             )
+            ui.animatePage(page)
         }
 
         fun resetSection(section: Section) {
@@ -203,6 +206,7 @@ object SettingsUi {
                 ),
             )
             root.addView(page)
+            ui.animatePage(page)
         }
 
         dialog.setContentView(
@@ -293,6 +297,53 @@ object SettingsUi {
         keyCard.addView(keyActions)
         body.addView(keyCard)
 
+        val imdbCard = ui.card()
+        imdbCard.addView(ui.sectionLabel("IMDb CATALOG · OMDb"))
+        imdbCard.addView(
+            ui.label(
+                "Search, IMDb IDs, posters and TV episode lists work without a TMDB key. " +
+                    "TMDB still powers the trending rows.",
+                13f, TEXT_DIM,
+            ).apply { setPadding(0, ui.dp(6), 0, ui.dp(10)) },
+        )
+        val omdbKey = Settings.omdbKey()
+        imdbCard.addView(
+            ui.label(
+                if (omdbKey == Omdb.DEFAULT_KEY) "Built-in key active · ${mask(omdbKey)}"
+                else "Custom key · ${mask(omdbKey)}",
+                12f, TEXT_FAINT,
+            ).apply { setPadding(0, 0, 0, ui.dp(8)) },
+        )
+        val (omdbRoot, omdbInput) = ui.secret("", "OMDb API key")
+        imdbCard.addView(omdbRoot)
+        val omdbActions = LinearLayout(ui.context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, ui.dp(10), 0, 0)
+        }
+        omdbActions.addView(ui.action("Save", true) {
+            val value = omdbInput.text.toString()
+            if (!Settings.isValidOmdbKey(value)) {
+                ui.toast("OMDb keys are 6–32 letters or digits")
+            } else {
+                Settings.saveOmdbKey(value)
+                ui.toast("IMDb catalog key saved")
+                rerender(Section.PLAYBACK)
+            }
+        })
+        omdbActions.addView(ui.action("Test", false) {
+            val value = omdbInput.text.toString().ifBlank { Settings.omdbKey() }
+            ui.toast("Testing OMDb…")
+            CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+                val ok = Omdb.testKey(value)
+                withContext(Dispatchers.Main) {
+                    ui.toast(if (ok) "OMDb works" else "OMDb rejected the key")
+                }
+            }
+        })
+        omdbActions.addView(ui.action("Get key", false) { ui.openUrl(Settings.OMDB_LINK) })
+        imdbCard.addView(omdbActions)
+        body.addView(imdbCard)
+
         val qualityCard = ui.card()
         qualityCard.addView(ui.sectionLabel("QUALITY FLOOR"))
         qualityCard.addView(
@@ -326,11 +377,13 @@ object SettingsUi {
     }
 
     private fun providers(ui: Ui, body: LinearLayout, rerender: (Section) -> Unit) {
+        val enabled = Settings.enabledServers().size
         val intro = ui.card()
-        intro.addView(ui.label("Built-in servers", 17f, TEXT, medium = true))
+        intro.addView(ui.label("Stream farm", 17f, TEXT, medium = true))
         intro.addView(
             ui.label(
-                "Queried in parallel. Each server has its own timeout and health breaker.",
+                "$enabled of ${ServerFarm.all.size} servers on. Fast providers run by default; " +
+                    "file-index and anime providers can be enabled below.",
                 13f, TEXT_DIM,
             ).apply { setPadding(0, ui.dp(6), 0, ui.dp(12)) },
         )
@@ -346,25 +399,62 @@ object SettingsUi {
         intro.addView(actions)
         body.addView(intro)
 
-        val card = ui.card()
-        card.addView(ui.sectionLabel("SERVERS"))
-        ServerFarm.all.forEachIndexed { index, spec ->
-            if (index > 0) card.addView(ui.divider(top = ui.dp(6), bottom = ui.dp(6)))
-            card.addView(
-                ui.toggleRow(
+        val filterCard = ui.card()
+        filterCard.addView(ui.sectionLabel("FIND A SERVER"))
+        val filter = ui.field("", "Name, language, or type")
+        filterCard.addView(filter)
+        body.addView(filterCard)
+
+        val rows = mutableListOf<Pair<LinearLayout, String>>()
+        val groups = listOf(
+            "STREAMING" to ServerFarm.all.filter { it.speed != ServerSpeed.SLOW && !it.animeOnly },
+            "FILE INDEX" to ServerFarm.all.filter { it.speed == ServerSpeed.SLOW && !it.animeOnly },
+            "ANIME" to ServerFarm.all.filter { it.animeOnly },
+        )
+        var animationIndex = 0
+        for ((heading, specs) in groups) {
+            if (specs.isEmpty()) continue
+            val card = ui.card()
+            card.addView(ui.sectionLabel("$heading · ${specs.size}"))
+            specs.forEachIndexed { index, spec ->
+                if (index > 0) card.addView(ui.divider(top = ui.dp(5), bottom = ui.dp(5)))
+                val badges = buildList {
+                    if (spec.supportsTv) add("TV")
+                    if (spec.supports4k) add("4K")
+                    if (spec.hasSubtitles) add("Subs")
+                    if (spec.animeOnly) add("Anime")
+                }
+                val speed = spec.speed.name.lowercase().replace('_', ' ')
+                val subtitle = "${spec.note} · $speed · ${if (spec.defaultEnabled) "default" else "optional"}"
+                val row = ui.toggleRow(
                     spec.name,
-                    "${spec.note} · ${if (spec.defaultEnabled) "default" else "optional"}",
+                    subtitle,
                     Settings.serverEnabled(spec.id),
-                ) { on -> Settings.saveServerEnabled(spec.id, on) },
-            )
+                    badges,
+                ) { on -> Settings.saveServerEnabled(spec.id, on) }
+                card.addView(row)
+                rows += row to "${spec.name} ${spec.note} ${spec.speed.name}".lowercase()
+                ui.animateIn(row, (animationIndex++ * 18L).coerceAtMost(240L))
+            }
+            body.addView(card)
         }
-        body.addView(card)
+
+        filter.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+            override fun afterTextChanged(s: Editable?) {
+                val query = s?.toString()?.trim()?.lowercase().orEmpty()
+                rows.forEach { (row, key) ->
+                    row.visibility = if (query.isEmpty() || key.contains(query)) View.VISIBLE else View.GONE
+                }
+            }
+        })
 
         val note = ui.card()
         note.addView(
             ui.label(
                 "These servers return public embed pages or JSON. Nothing here bypasses DRM, " +
-                    "logins, or bot challenges.",
+                    "logins, or bot challenges. TV requests use season and episode when the server supports it.",
                 12f, TEXT_FAINT,
             ),
         )
@@ -623,6 +713,27 @@ object SettingsUi {
             layoutParams = LinearLayout.LayoutParams(0, 1, 1f)
         }
 
+        fun animatePage(view: View) {
+            view.alpha = 0f
+            view.translationY = dp(10).toFloat()
+            view.animate().alpha(1f).translationY(0f).setDuration(190).start()
+        }
+
+        fun animateIn(view: View, delay: Long) {
+            view.alpha = 0f
+            view.translationY = dp(8).toFloat()
+            view.animate().alpha(1f).translationY(0f).setStartDelay(delay).setDuration(220).start()
+        }
+
+        fun focusFeedback(view: View) {
+            view.setOnFocusChangeListener { target, focused ->
+                target.animate().scaleX(if (focused) 1.03f else 1f)
+                    .scaleY(if (focused) 1.03f else 1f)
+                    .setDuration(120)
+                    .start()
+            }
+        }
+
         fun divider(top: Int = 0, bottom: Int = 0): View = View(context).apply {
             setBackgroundColor(Color.argb(20, 255, 255, 255))
             layoutParams = LinearLayout.LayoutParams(
@@ -663,6 +774,7 @@ object SettingsUi {
             background = ripple(rounded(Color.TRANSPARENT, 999))
             isClickable = true
             isFocusable = true
+            focusFeedback(this)
             setOnClickListener { onClick() }
         }
 
@@ -679,6 +791,7 @@ object SettingsUi {
                 layoutParams = LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT, dp(46),
                 ).apply { rightMargin = dp(8) }
+                focusFeedback(this)
                 setOnClickListener { onClick() }
             }
 
@@ -695,6 +808,7 @@ object SettingsUi {
                 layoutParams = LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT, dp(40),
                 ).apply { rightMargin = dp(8) }
+                focusFeedback(this)
                 setOnClickListener { onClick() }
             }
 
@@ -774,6 +888,7 @@ object SettingsUi {
                 }
             }
             paint(false)
+            focusFeedback(root)
             root.setOnClickListener {
                 checked = !checked
                 paint(true)
@@ -782,10 +897,16 @@ object SettingsUi {
             return root
         }
 
+        fun badge(value: String): TextView = label(value.uppercase(), 9f, TEXT_MUTED, medium = true, spacing = 0.06f).apply {
+            setPadding(dp(7), dp(3), dp(7), dp(3))
+            background = rounded(SURFACE_HIGH, 999)
+        }
+
         fun toggleRow(
             title: String,
             subtitle: String,
             initial: Boolean,
+            badges: List<String> = emptyList(),
             onChange: (Boolean) -> Unit,
         ): LinearLayout {
             val row = LinearLayout(context).apply {
@@ -798,10 +919,22 @@ object SettingsUi {
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             }
             texts.addView(label(title, 15f, TEXT, medium = true))
+            if (badges.isNotEmpty()) {
+                val badgesRow = LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    setPadding(0, dp(5), 0, 0)
+                }
+                badges.forEach { value ->
+                    badgesRow.addView(badge(value), LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ).apply { rightMargin = dp(5) })
+                }
+                texts.addView(badgesRow)
+            }
             if (subtitle.isNotBlank()) {
                 texts.addView(
                     label(subtitle, 12f, TEXT_FAINT).apply {
-                        setPadding(0, dp(3), dp(8), 0)
+                        setPadding(0, dp(4), dp(8), 0)
                     },
                 )
             }
@@ -851,6 +984,7 @@ object SettingsUi {
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT,
                 ).apply { bottomMargin = dp(10) }
+                focusFeedback(this)
                 setOnClickListener { onClick() }
             }
         }

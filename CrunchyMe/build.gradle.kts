@@ -22,6 +22,10 @@ android {
 
 dependencies {
     val cloudstream by configurations
+    val implementation by configurations
+    val testImplementation by configurations
     cloudstream("com.lagradost:cloudstream3:pre-release")
 
+    implementation("org.jsoup:jsoup:1.17.2")
+    testImplementation("org.jsoup:jsoup:1.17.2")
 }

@@ -15,6 +15,7 @@ data class Candidate(
     val qualityHint: Int = 0,
     val audioLabel: String = "",
     val sizeLabel: String = "",
+    val mediaLabel: String = "",
     val inlineManifest: String? = null,
     val subtitles: List<SubtitleTrack> = emptyList(),
     val speedMs: Long = 0L,

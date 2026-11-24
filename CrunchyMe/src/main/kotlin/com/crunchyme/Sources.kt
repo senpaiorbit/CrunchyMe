@@ -107,7 +107,7 @@ class CustomProviderSource(private val template: ProviderTemplate) : StreamSourc
 
 object Sources {
 
-    private const val SOURCE_TIMEOUT_MS = 30_000L
+    private const val SOURCE_TIMEOUT_MS = 45_000L
 
     suspend fun collect(
         request: LinkRequest,

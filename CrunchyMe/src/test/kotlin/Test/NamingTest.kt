@@ -57,4 +57,16 @@ class NamingTest {
         assertEquals("1080p · Hindi · 2.4 GB", Naming.linkLabel(1080, "Hindi", "2.4 GB"))
         assertEquals("720p · Hindi", Naming.linkLabel(720, "Hindi", ""))
     }
+
+    @Test
+    fun buildsIndStreamStyleDisplayNames() {
+        assertEquals("VidLink (Unknown)", Naming.priorityName("VidLink"))
+        assertTrue(Naming.displayName("VidLink", audioLabel = "Hindi").startsWith("VidLink (🇮🇳 Hindi)"))
+        assertEquals("VidLink (Multi)", Naming.priorityName("VidLink", "Hindi, English, Tamil, Telugu"))
+        assertEquals("4KHDHub WEB-DL HEVC (Unknown)", Naming.displayName("4KHDHub", mediaLabel = "WEB-DL HEVC"))
+        assertEquals("VidLink (🇮🇳 Hindi)", Naming.displayName("VidLink 720p", "Hindi"))
+        assertEquals("English", Naming.canonicalSubtitleName("English SDH"))
+        assertEquals("1.9 GB", Naming.bytesLabel(1_900_000_000L))
+        assertEquals("777 MB", Naming.bytesLabel(777_303_372L))
+    }
 }

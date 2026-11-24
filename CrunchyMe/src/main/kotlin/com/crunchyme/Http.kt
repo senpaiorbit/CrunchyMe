@@ -5,8 +5,10 @@ import java.io.InputStream
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 
 data class HttpResult(
     val code: Int,
@@ -23,6 +25,14 @@ interface HttpEngine {
         timeoutSec: Long,
         range: String? = null,
     ): HttpResult?
+
+    suspend fun post(
+        url: String,
+        body: String,
+        contentType: String,
+        headers: Map<String, String>,
+        timeoutSec: Long,
+    ): HttpResult? = null
 }
 
 /** Plain OkHttp engine: works on Android (the app ships OkHttp) and on the JVM for tests. */
@@ -59,6 +69,42 @@ object OkHttpEngine : HttpEngine {
             callClient.newCall(builder.build()).execute().use { response ->
                 val raw = response.body.byteStream().use { stream ->
                     Http.readLimited(stream, Http.responseLimit(range))
+                }
+                HttpResult(
+                    code = response.code,
+                    body = raw.toString(Charsets.UTF_8),
+                    bytes = raw,
+                    finalUrl = response.request.url.toString(),
+                    headers = response.headers.names().associateWith { response.headers[it] ?: "" },
+                )
+            }
+        } catch (t: Throwable) {
+            null
+        }
+    }
+
+    override suspend fun post(
+        url: String,
+        body: String,
+        contentType: String,
+        headers: Map<String, String>,
+        timeoutSec: Long,
+    ): HttpResult? = withContext(Dispatchers.IO) {
+        try {
+            val builder = Request.Builder().url(url)
+                .post(body.toRequestBody(contentType.toMediaType()))
+            if (!headers.keys.any { it.equals("User-Agent", true) }) {
+                builder.header("User-Agent", Http.UA)
+            }
+            headers.forEach { (key, value) ->
+                if (key.isNotBlank() && value.isNotBlank()) builder.header(key, value)
+            }
+            val callClient = client.newBuilder()
+                .callTimeout(timeoutSec.coerceIn(3, 60), TimeUnit.SECONDS)
+                .build()
+            callClient.newCall(builder.build()).execute().use { response ->
+                val raw = response.body.byteStream().use { stream ->
+                    Http.readLimited(stream, Http.responseLimit(null))
                 }
                 HttpResult(
                     code = response.code,
@@ -132,6 +178,21 @@ object Http {
         headers: Map<String, String> = emptyMap(),
         timeoutSec: Long = 15,
     ): String? = text(url, headers, timeoutSec)
+
+    suspend fun post(
+        url: String,
+        body: String,
+        headers: Map<String, String> = emptyMap(),
+        contentType: String = "application/x-www-form-urlencoded; charset=UTF-8",
+        timeoutSec: Long = 15,
+    ): String? {
+        val result = try {
+            engine.post(url, body, contentType, headers, timeoutSec)
+        } catch (t: Throwable) {
+            null
+        } ?: return null
+        return result.body.takeIf { result.code in 200..399 && it.isNotBlank() }
+    }
 
     /** 2xx/3xx/416 means alive; 404/410 means gone; anything else is unknown. */
     suspend fun alive(url: String, headers: Map<String, String> = emptyMap()): Boolean? {

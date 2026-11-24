@@ -29,9 +29,17 @@ object CloudStreamEngine : HttpEngine {
                 headers = response.headers.names().associateWith { response.headers[it] ?: "" },
             )
         } catch (t: Throwable) {
-            null
+            OkHttpEngine.request(url, headers, timeoutSec, range)
         }
     }
+
+    override suspend fun post(
+        url: String,
+        body: String,
+        contentType: String,
+        headers: Map<String, String>,
+        timeoutSec: Long,
+    ): HttpResult? = OkHttpEngine.post(url, body, contentType, headers, timeoutSec)
 }
 
 /** Gives custom providers access to CloudStream's host-extractor registry. */
