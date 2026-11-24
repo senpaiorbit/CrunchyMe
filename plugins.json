@@ -1,0 +1,23 @@
+[
+    {
+        "url": "https://raw.githubusercontent.com/senpaiorbit/CrunchyMe/builds/CrunchyMe.cs3",
+        "status": 1,
+        "version": 1,
+        "name": "CrunchyMe",
+        "internalName": "CrunchyMe",
+        "authors": [
+            "CrunchyMe"
+        ],
+        "description": "TMDB-first catalog with a pluggable multi-source stream farm: public-domain archive, Stremio/Nuvio addons and user-defined providers.",
+        "fileSize": 127107,
+        "repositoryUrl": "https://github.com/senpaiorbit/CrunchyMe",
+        "language": "en",
+        "tvTypes": [
+            "Movie",
+            "TvSeries"
+        ],
+        "iconUrl": "https://raw.githubusercontent.com/senpaiorbit/CrunchyMe/main/CrunchyMe/icon.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-02a4d4e1394b80660faac7e79c83779b41d2981a579c8c52fed863f6f092d9f4"
+    }
+]
