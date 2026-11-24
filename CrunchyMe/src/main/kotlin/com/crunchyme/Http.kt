@@ -48,7 +48,9 @@ object OkHttpEngine : HttpEngine {
                 builder.header("User-Agent", Http.UA)
             }
             headers.forEach { (key, value) ->
-                if (key.isNotBlank() && value.isNotBlank()) builder.header(key, value)
+                if (key.isNotBlank() && (value.isNotBlank() || key.equals("User-Agent", true))) {
+                    builder.header(key, value)
+                }
             }
             if (!range.isNullOrBlank()) builder.header("Range", range)
             val callClient = client.newBuilder()

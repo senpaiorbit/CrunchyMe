@@ -12,6 +12,7 @@ recompiling the plugin.
 TMDB (metadata)  ──►  LinkRequest  ──►  Sources.collect()  ──►  MediaProbe  ──►  CloudStream player
                                          │
                                          ├── Internet Archive (built in, public domain)
+                                         ├── Built-in servers (VidBolt, Vidrift, Vidly, …)
                                          ├── Stremio / Nuvio addons (user supplied)
                                          └── Custom providers (user supplied templates)
 ```
@@ -59,6 +60,7 @@ bundled into the plugin and never sent anywhere except `api.themoviedb.org`.
 | TMDB API key | Enables catalog, search, details and episodes. |
 | Minimum quality | Drops streams whose height is *known* to be below the floor (480p / 720p / 1080p / Any). Unknown heights are kept. |
 | Internet Archive | Built-in legal source for public-domain films. |
+| Built-in servers | Turn individual providers on or off (VidBolt, Vidrift, Vidly, Bingr, NetMirror, Atlantic). |
 | Stremio / Nuvio addons | Enables the addon source. |
 | Custom providers | Enable/disable or remove user-defined templates. |
 | Clear caches | Drops TMDB, link and addon-manifest caches. |
@@ -91,6 +93,27 @@ series metadata is not reliable enough to build an episode list from.
 The resolver searches `advancedsearch.php`, ranks results by title and year, then reads
 `archive.org/metadata/<id>` and keeps playable video files (`h.264`, `MPEG4`, `Matroska`, `WebM`,
 `Ogg Video`). Trailers, samples, thumbnails and `.ia.` derivative files are filtered out.
+
+### Built-in servers
+
+The provider ships with six optional servers. They are queried in parallel with the rest of the
+farm, and each one has its own timeout and circuit breaker.
+
+| Server | Mode | Default | Notes |
+| --- | --- | --- | --- |
+| VidBolt | JSON API | on | Reads `stream.sources`, keeps the inline HLS/DASH master and its audio/subtitle tracks. Falls back through the server list when the first response is empty. |
+| Vidrift | Embed | on | Parses `var embedMeta`, uses the pre-warmed `orionStreams` manifests, and falls back to the token-gated source API. |
+| Vidly | Embed | on | Scans the embed page for HLS masters and probes each one. |
+| Bingr | Embed | on | Extracts `master.m3u8` URLs from the watch page. Cloudflare may challenge this host. |
+| NetMirror | JSON API | on | Reads `streams[]` and `mp4`; uses the `videodownloader.site` referer required by the file CDN. |
+| Atlantic | JSON API | off | Tries the `stream.hls.lol` provider endpoints, then the legacy CDN. Rate-limited on some networks. |
+
+Enable or disable any of them in **Settings → Providers**. If a server is slow or blocked, turn it
+off; the remaining sources still run. The health breaker also disables a repeatedly failing server
+for five minutes, and **Maintenance → Reset source health** clears that state.
+
+These resolvers do not bypass DRM, logins, or bot challenges. A Cloudflare interstitial is detected
+and skipped rather than treated as an empty result.
 
 ### Stremio / Nuvio addons (user supplied)
 
@@ -133,37 +156,41 @@ instead of being parsed as empty results.
 
 ## Adding a new built-in source
 
-1. Implement `StreamSource` in `CrunchyMe/src/main/kotlin/com/crunchyme/`:
+1. Add a `ServerSpec` to `ServerFarm.all` in `ServerFarm.kt` with the movie and TV URL templates.
+   Set `kind = ServerKind.JSON` for an API endpoint or `ServerKind.EMBED` for a page.
+2. Add a resolver branch in `BuiltinServerSource.resolve` if the provider needs custom parsing.
+   Otherwise the generic `JsonResolver` / `EmbedPage` handles it.
+3. Add a parser test with a recorded fixture. Keep network code out of the parser so it stays
+   JVM-testable.
+4. Add the provider to the README table. The settings UI reads `ServerFarm.all`, so no UI edit is
+   needed; new providers default to on unless `defaultEnabled = false`.
+
+The important rule: sources return `Candidate`s, never CloudStream types. That keeps them
+unit-testable on the JVM and keeps the CloudStream API confined to `CrunchyMeProvider`,
+`CrunchyMePlugin` and `CloudStreamBridge`.
+
+A minimal custom resolver:
 
 ```kotlin
-object MySource : StreamSource {
-    override val id = "my-source"
-    override val name = "My Source"
-
-    override suspend fun resolve(request: LinkRequest): List<Candidate> {
-        val url = "https://api.example/play/${request.imdbId}"
-        val body = Http.text(url, mapOf("Accept" to "application/json")) ?: return emptyList()
-        return JsonWalk.harvest(org.json.JSONObject(body), url).map { hit ->
+private object MySource {
+    suspend fun resolve(spec: ServerSpec, request: LinkRequest): List<Candidate> {
+        val url = ServerFarm.urlFor(spec, request) ?: return emptyList()
+        val body = Http.text(url, headersFor(spec), spec.timeoutSec.toLong()) ?: return emptyList()
+        val root = runCatching { JSONObject(body) }.getOrNull() ?: return emptyList()
+        return JsonWalk.harvest(root, url).map { hit ->
             Candidate(
-                sourceId = id,
-                sourceName = name,
+                sourceId = spec.id,
+                sourceName = spec.name,
                 url = hit.url,
-                kind = if (hit.url.contains(".m3u8")) MediaKind.HLS else MediaKind.FILE,
+                kind = EmbedResolver.kindOf(hit.url),
+                referer = spec.referer,
                 qualityHint = hit.quality,
-                audioLabel = hit.language,
+                audioLabel = Naming.displayLabel(hit.language, request.originalLanguage),
             )
         }
     }
 }
 ```
-
-2. Add it to `Sources.collect` behind a setting and a `Health.isHealthy(...)` check.
-3. Add a settings toggle in `Settings` + `SettingsUi`.
-4. Add parser tests with a recorded fixture, and one live test guarded by `Assumptions`.
-
-The important rule: sources return `Candidate`s, never CloudStream types. That keeps them
-unit-testable on the JVM and keeps the CloudStream API confined to `CrunchyMeProvider`,
-`CrunchyMePlugin` and `CloudStreamBridge`.
 
 ## Reliability details
 
@@ -205,6 +232,9 @@ Test coverage:
 | `HtmlHarvestTest` | iframes, `<video>`, escaped URLs, challenge detection |
 | `ArchiveParseTest` | search ranking, file filtering, URL encoding, size labels |
 | `StremioParseTest` | URL normalisation, manifest capabilities, direct streams vs torrents |
+| `ServerFarmTest` | unique ids, movie/TV URL templates, default server set |
+| `VidBoltParseTest` | HLS/DASH sources, inline masters, audio labels, malformed payloads |
+| `VidriftParseTest` | `embedMeta`, `orionStreams`, warm manifests, Evion fallback |
 | `LiveTmdbTest` | real key, search, details, IMDB id, seasons/episodes, rows |
 | `LiveArchiveTest` | real public-domain film resolves to 720p+ MP4 files |
 
@@ -215,8 +245,9 @@ Test coverage:
 - **TMDB is metadata only.** It never provides video.
 - **Internet Archive is movie-only** and mostly older/public-domain cinema.
 - **Stremio addons must return direct HTTP streams.** Torrent-based addons are skipped.
-- **Cloudflare-protected hosts** may refuse plain HTTP. Use an addon that provides direct links
-  instead of trying to bypass the challenge.
+- **Cloudflare-protected hosts** may refuse plain HTTP. The built-in Bingr resolver is the most
+  likely to hit this; disable it and use another server or an addon that provides direct links.
+  CrunchyMe does not try to bypass the challenge.
 - Custom providers are the user's responsibility. Only use sources you are allowed to access.
 
 ## Troubleshooting
@@ -225,7 +256,7 @@ Test coverage:
 | --- | --- |
 | Home rows are empty | Add a TMDB v3 key in CrunchyMe settings and tap **Test**. |
 | Search returns nothing | Same as above; check the key is the 32-character v3 key. |
-| "No playable streams" | Enable Internet Archive, add a Stremio addon, or add a custom provider. Not every title is public domain. |
+| "No playable streams" | Check **Settings → Providers**; enable VidBolt/Vidrift/Vidly, add a Stremio addon, or add a custom provider. Not every title is available. |
 | Only low quality appears | Lower the minimum quality; some archive files are 480p. |
 | A source stopped working | **Reset health**, then **Clear caches**; the source may be temporarily blocked. |
 | Build fails on `sdk.dir` | Create `local.properties` with `sdk.dir=/path/to/Android/Sdk`. |

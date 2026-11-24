@@ -4,7 +4,6 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
@@ -20,6 +19,7 @@ data class SourceConfig(
     val stremioEnabled: Boolean = true,
     val addonUrls: List<String> = emptyList(),
     val providers: List<ProviderTemplate> = emptyList(),
+    val servers: List<ServerSpec> = emptyList(),
 )
 
 /** A link returned by the CloudStream host-extractor registry, kept free of app types. */
@@ -86,74 +86,18 @@ class CustomProviderSource(private val template: ProviderTemplate) : StreamSourc
         }
     }
 
-    private suspend fun fromHtml(url: String, body: String): List<Candidate> {
-        val headers = Http.withReferer(template.headers, template.referer)
-        val found = LinkedHashMap<String, Candidate>()
+    private suspend fun fromHtml(url: String, body: String): List<Candidate> =
+        EmbedResolver.resolve(
+            url = url,
+            body = body,
+            referer = template.referer,
+            headers = template.headers,
+            sourceId = id,
+            sourceName = name,
+        )
 
-        fun add(mediaUrl: String, referer: String?) {
-            if (mediaUrl.isBlank() || found.containsKey(mediaUrl)) return
-            found[mediaUrl] = Candidate(
-                sourceId = id,
-                sourceName = name,
-                url = mediaUrl,
-                kind = kindOf(mediaUrl),
-                referer = referer,
-                headers = template.headers,
-            )
-        }
-
-        HtmlHarvest.mediaUrls(body).forEach { add(it, template.referer) }
-
-        if (found.isEmpty()) {
-            val frames = HtmlHarvest.iframes(body, url).take(3)
-            val frameResults = coroutineScope {
-                frames.map { frame ->
-                    async {
-                        val frameBody = Http.text(frame, Http.withReferer(headers, url), 8)
-                            ?: return@async emptyList()
-                        HtmlHarvest.mediaUrls(frameBody)
-                    }
-                }.awaitAll()
-            }
-            frameResults.flatten().forEach { add(it, url) }
-        }
-
-        if (found.isEmpty()) {
-            HtmlHarvest.videoTag(body, url)?.let { add(it, template.referer) }
-        }
-
-        if (found.isEmpty()) {
-            val links = mutableListOf<BridgeLink>()
-            val subtitles = mutableListOf<SubtitleTrack>()
-            val ok = runCatching {
-                ExtractorBridge.loader(url, template.referer, { subtitles += it }, { links += it })
-            }.getOrDefault(false)
-            if (!ok && links.isEmpty()) {
-                Logx.d("Custom", "${template.name}: nothing harvested")
-            }
-            links.forEach { link ->
-                if (link.url.isBlank() || found.containsKey(link.url)) return@forEach
-                found[link.url] = Candidate(
-                    sourceId = id,
-                    sourceName = name,
-                    url = link.url,
-                    kind = kindOf(link.url, link.type),
-                    referer = link.referer ?: template.referer,
-                    headers = template.headers,
-                    qualityHint = link.quality,
-                    subtitles = subtitles.toList(),
-                )
-            }
-        }
-
-        return found.values.toList()
-    }
-
-    private fun kindOf(url: String, type: String = ""): MediaKind = when {
-        type.equals("M3U8", true) || url.contains(".m3u8", true) -> MediaKind.HLS
-        type.equals("DASH", true) || url.contains(".mpd", true) -> MediaKind.DASH
-        else -> MediaKind.FILE
-    }
+    private fun kindOf(url: String, type: String = ""): MediaKind =
+        EmbedResolver.kindOf(url, type)
 
     companion object {
         fun providerId(template: ProviderTemplate): String =
@@ -184,6 +128,13 @@ object Sources {
         ) {
             jobs += async {
                 guard(StremioSource.ID, log) { StremioSource.resolve(request, config.addonUrls) }
+            }
+        }
+
+        for (spec in config.servers) {
+            if (!Health.isHealthy(spec.id)) continue
+            jobs += async {
+                guard(spec.id, log) { BuiltinServerSource(spec).resolve(request) }
             }
         }
 

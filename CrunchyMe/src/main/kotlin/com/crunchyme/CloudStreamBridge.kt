@@ -10,21 +10,27 @@ object CloudStreamEngine : HttpEngine {
         headers: Map<String, String>,
         timeoutSec: Long,
         range: String?,
-    ): HttpResult? = try {
-        val allHeaders = if (range.isNullOrBlank()) headers else headers + ("Range" to range)
-        val response = app.get(url, timeout = timeoutSec, headers = allHeaders)
-        val bytes = response.body.byteStream().use { stream ->
-            Http.readLimited(stream, Http.responseLimit(range))
+    ): HttpResult? {
+        // Some embeds reject any non-empty UA; OkHttp can send an explicit empty one.
+        if (headers.any { it.key.equals("User-Agent", true) && it.value.isBlank() }) {
+            return OkHttpEngine.request(url, headers, timeoutSec, range)
         }
-        HttpResult(
-            code = response.code,
-            body = bytes.toString(Charsets.UTF_8),
-            bytes = bytes,
-            finalUrl = response.url,
-            headers = response.headers.names().associateWith { response.headers[it] ?: "" },
-        )
-    } catch (t: Throwable) {
-        null
+        return try {
+            val allHeaders = if (range.isNullOrBlank()) headers else headers + ("Range" to range)
+            val response = app.get(url, timeout = timeoutSec, headers = allHeaders)
+            val bytes = response.body.byteStream().use { stream ->
+                Http.readLimited(stream, Http.responseLimit(range))
+            }
+            HttpResult(
+                code = response.code,
+                body = bytes.toString(Charsets.UTF_8),
+                bytes = bytes,
+                finalUrl = response.url,
+                headers = response.headers.names().associateWith { response.headers[it] ?: "" },
+            )
+        } catch (t: Throwable) {
+            null
+        }
     }
 }
 
