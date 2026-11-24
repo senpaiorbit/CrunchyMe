@@ -59,6 +59,16 @@ class ServerFarmTest {
     }
 
     @Test
+    fun defaultPriorityStartsWithReliableProviders() {
+        val order = ServerFarm.defaultPriorityOrder()
+        assertEquals(ServerFarm.all.size, order.size)
+        assertEquals(order.size, order.distinct().size)
+        assertEquals("moviebox", order.first())
+        assertTrue(order.indexOf("vidrift") < order.indexOf("4khdhub"))
+        assertTrue(order.indexOf("vidrift") < order.indexOf("animeworld"))
+    }
+
+    @Test
     fun defaultsEnableTheWorkingServers() {
         val defaults = ServerFarm.defaultEnabledIds()
         listOf(

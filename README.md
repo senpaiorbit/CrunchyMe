@@ -9,7 +9,7 @@ addons can be attached from settings, and new providers can be added as URL temp
 recompiling the plugin.
 
 ```
-TMDB (metadata)  ──►  LinkRequest  ──►  Sources.collect()  ──►  MediaProbe  ──►  CloudStream player
+TMDB (metadata)  ──►  LinkRequest  ──►  Sources.stream()  ──►  MediaProbe  ──►  CloudStream player
                                          │
                                          ├── Internet Archive (built in, public domain)
                                          ├── Built-in servers (VidBolt, Vidrift, Vidly, …)
@@ -60,6 +60,8 @@ bundled into the plugin and never sent anywhere except `api.themoviedb.org`.
 | Catalog provider | **TMDB** (default) or **IMDb**. IMDb uses OMDb and works without a TMDB key. |
 | TMDB API key | Enables the TMDB catalog, search, details and episodes. |
 | Minimum quality | Drops streams whose height is *known* to be below the floor (480p / 720p / 1080p / Any). Unknown heights are kept. |
+| Provider priority | Move providers up or down. Top providers start first; the rest continue in the background. |
+| Parallel tasks | How many providers resolve at once (2–16). Higher is faster; lower is gentler on slow devices. |
 | Internet Archive | Built-in legal source for public-domain films. |
 | Built-in servers | Turn individual providers on or off (VidBolt, Vidrift, Vidly, Bingr, NetMirror, MovieBox, NetNaija, Toonix, …). |
 | Stremio / Nuvio addons | Enables the addon source. |
@@ -73,17 +75,19 @@ bundled into the plugin and never sent anywhere except `api.themoviedb.org`.
 2. `Refs.parse` extracts the TMDB id, IMDB id, type, season and episode from the URL. The URL is
    only an identifier — no provider website is scraped for metadata.
 3. `Tmdb.detail` supplies the title, year and IMDB id (cached for 15 minutes).
-4. `Sources.collect` fans out to every enabled source in parallel. Each source has a 30 second
-   budget; a failing source cannot block the others.
+4. `Sources.stream` runs the enabled sources in priority order, up to the configured parallel-task
+   limit. Each source has its own timeout; a failing source cannot block the others. Results are
+   delivered as soon as each source finishes, so the first links appear while slower providers are
+   still running.
 5. `MediaProbe` inspects each candidate:
    - HLS: fetches the master playlist, reads `RESOLUTION`, `#EXT-X-MEDIA` audio languages and
      `TYPE=SUBTITLES` tracks.
    - DASH: reads `<Representation height>` and audio `lang`.
    - MP4/MKV: issues a `Range` request and parses the `moov → trak → tkhd` box for the real height.
 6. Candidates below the quality floor (when the height is known) are dropped. If every
-   candidate is below the floor, the best low-quality candidate is kept instead of returning
-   nothing. The rest are deduplicated, sorted by height, cached for 2 minutes, and emitted with the right
-   `Referer`/headers and subtitle tracks.
+   candidate from a source is below the floor, its best low-quality candidate is kept instead of
+   returning nothing. Links are deduplicated, emitted progressively, cached for 2 minutes, and
+   sent with the right `Referer`/headers and subtitle tracks.
 
 ## Sources
 
@@ -98,8 +102,9 @@ The resolver searches `advancedsearch.php`, ranks results by title and year, the
 
 ### Built-in servers
 
-The provider ships with twenty optional servers. They are queried in parallel with the rest of the
-farm, and each one has its own timeout and circuit breaker.
+The provider ships with twenty-one optional servers. They run in the configured priority order,
+up to the parallel-task limit, and each one has its own timeout and circuit breaker. Anime-only
+servers are skipped automatically for non-anime titles.
 
 | Server | Mode | Default | Notes |
 | --- | --- | --- | --- |
@@ -114,9 +119,10 @@ farm, and each one has its own timeout and circuit breaker.
 | Toonix | Embed | off | Parses the Next.js RSC/flight payload, `legacySrc`, `/api/stream/s/…` and Hydrax sources. Cartoons and movies. |
 | Toonix Anime | Embed | on | Same resolver for anime titles; runs only when TMDB/OMDb genres include Animation/Anime. |
 
-Enable or disable any of them in **Settings → Providers**. If a server is slow or blocked, turn it
-off; the remaining sources still run. The health breaker also disables a repeatedly failing server
-for five minutes, and **Maintenance → Reset source health** clears that state.
+Enable or disable any of them in **Settings → Providers**. Use **Priority** to put reliable
+providers such as MovieBox or Vidrift first. If a server is slow or blocked, move it down or turn
+it off; the remaining sources still run. The health breaker also disables a repeatedly failing
+server for five minutes, and **Maintenance → Reset source health** clears that state.
 
 These resolvers do not bypass DRM, logins, or bot challenges. A Cloudflare interstitial is detected
 and skipped rather than treated as an empty result.
@@ -202,7 +208,12 @@ private object MySource {
 
 - **No WebView, no JavaScript.** Everything is HTTP + regex/JSON parsing. This is faster and
   cannot be fingerprinted as easily as a headless browser.
-- **Per-source timeouts** (30 s farm, 12 s per addon, 6–20 s per HTTP call) and a circuit breaker
+- **Progressive links.** The first source that finishes is emitted immediately; slower providers
+  keep resolving in the background. The user can pick a link or skip loading without waiting for
+  every provider.
+- **Priority scheduling.** Providers start in the user's saved order. The default order puts
+  MovieBox, Vidrift, VidLink, VidBolt and Vidly ahead of file-index and anime sources.
+- **Per-source timeouts** (45 s farm, 12 s per addon, 6–20 s per HTTP call) and a circuit breaker
   that disables a source after four consecutive failures for five minutes.
 - **Caching**: TMDB 15 min, resolved links 2 min (signed MovieBox URLs expire quickly), addon manifests 6 h. Re-opening an episode is
   instant and does not re-hit the network.

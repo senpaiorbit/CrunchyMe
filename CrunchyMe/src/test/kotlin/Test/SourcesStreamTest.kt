@@ -1,0 +1,76 @@
+package Test
+
+import com.crunchyme.Health
+import com.crunchyme.Http
+import com.crunchyme.HttpEngine
+import com.crunchyme.HttpResult
+import com.crunchyme.LinkRequest
+import com.crunchyme.ProviderTemplate
+import com.crunchyme.SourceConfig
+import com.crunchyme.Sources
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+
+class SourcesStreamTest {
+
+    private val request = LinkRequest(
+        tmdbId = 1,
+        imdbId = "tt0000001",
+        type = "movie",
+        season = -1,
+        episode = -1,
+        title = "Test",
+        year = 2026,
+        originalLanguage = "en",
+    )
+
+    @Test
+    fun streamsPriorityOrderWithoutWaitingForSlowSources() = runBlocking {
+        val original = Http.engine
+        Health.reset()
+        try {
+            val slowDone = AtomicBoolean(false)
+            Http.engine = object : HttpEngine {
+                override suspend fun request(
+                    url: String,
+                    headers: Map<String, String>,
+                    timeoutSec: Long,
+                    range: String?,
+                ): HttpResult {
+                    if (url.contains("slow")) {
+                        delay(400)
+                        slowDone.set(true)
+                    }
+                    val body = """{"url":"https://cdn.test/${if (url.contains("slow")) "slow" else "fast"}.mp4"}"""
+                    return HttpResult(200, body, body.toByteArray(), url, emptyMap())
+                }
+            }
+
+            val config = SourceConfig(
+                archiveEnabled = false,
+                stremioEnabled = false,
+                providers = listOf(
+                    ProviderTemplate("Fast", "https://fast.test/embed", json = true),
+                    ProviderTemplate("Slow", "https://slow.test/embed", json = true),
+                ),
+                parallelism = 1,
+            )
+            val order = mutableListOf<String>()
+            Sources.stream(request, config, {}) { id, items ->
+                order += id
+                if (order.size == 1) {
+                    assert(items.isNotEmpty())
+                    assertFalse(slowDone.get(), "fast result waited for slow source")
+                }
+            }
+            assertEquals(listOf("p:fast", "p:slow"), order)
+        } finally {
+            Http.engine = original
+            Health.reset()
+        }
+    }
+}

@@ -419,6 +419,74 @@ object SettingsUi {
         intro.addView(actions)
         body.addView(intro)
 
+        val priorityCard = ui.card()
+        priorityCard.addView(ui.sectionLabel("PRIORITY · FIRST TO LAST"))
+        priorityCard.addView(
+            ui.label(
+                "Top providers start first. Move a provider up to make it resolve sooner; " +
+                    "slower providers keep running in the background.",
+                13f, TEXT_DIM,
+            ).apply { setPadding(0, ui.dp(6), 0, ui.dp(10)) },
+        )
+        val priority = Settings.serverPriority()
+        priority.forEachIndexed { index, id ->
+            val spec = ServerFarm.spec(id) ?: return@forEachIndexed
+            val row = LinearLayout(ui.context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, ui.dp(5), 0, ui.dp(5))
+            }
+            val texts = LinearLayout(ui.context).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            texts.addView(ui.label("${index + 1}. ${spec.name}", 14f, TEXT, medium = true))
+            texts.addView(
+                ui.label(
+                    if (Settings.serverEnabled(spec.id)) spec.note else "off",
+                    11f, if (Settings.serverEnabled(spec.id)) TEXT_MUTED else TEXT_FAINT,
+                ),
+            )
+            row.addView(texts)
+            row.addView(ui.textButton("↑", if (index == 0) TEXT_FAINT else TEXT_DIM, 18f) {
+                if (index > 0) {
+                    Settings.moveServer(id, -1)
+                    rerender(Section.PROVIDERS)
+                }
+            })
+            row.addView(ui.textButton("↓", if (index == priority.lastIndex) TEXT_FAINT else TEXT_DIM, 18f) {
+                if (index < priority.lastIndex) {
+                    Settings.moveServer(id, 1)
+                    rerender(Section.PROVIDERS)
+                }
+            })
+            priorityCard.addView(row)
+        }
+        priorityCard.addView(ui.action("Reset priority", false) {
+            Settings.resetServerPriority()
+            rerender(Section.PROVIDERS)
+        })
+        body.addView(priorityCard)
+
+        val speedCard = ui.card()
+        speedCard.addView(ui.sectionLabel("PARALLEL TASKS"))
+        speedCard.addView(
+            ui.label(
+                "How many providers resolve at once. Higher is faster but uses more memory and data; " +
+                    "lower is gentler on slow devices.",
+                13f, TEXT_DIM,
+            ).apply { setPadding(0, ui.dp(6), 0, ui.dp(10)) },
+        )
+        val speedChips = LinearLayout(ui.context).apply { orientation = LinearLayout.HORIZONTAL }
+        listOf(2, 4, 6, 8, 12, 16).forEach { value ->
+            speedChips.addView(ui.chip("$value", Settings.parallelLevel() == value) {
+                Settings.saveParallelLevel(value)
+                rerender(Section.PROVIDERS)
+            })
+        }
+        speedCard.addView(speedChips)
+        body.addView(speedCard)
+
         val filterCard = ui.card()
         filterCard.addView(ui.sectionLabel("FIND A SERVER"))
         val filter = ui.field("", "Name, language, or type")
@@ -426,10 +494,12 @@ object SettingsUi {
         body.addView(filterCard)
 
         val rows = mutableListOf<Pair<LinearLayout, String>>()
+        val priorityIndex = priority.withIndex().associate { it.value to it.index }
+        val ordered = ServerFarm.all.sortedBy { priorityIndex[it.id] ?: Int.MAX_VALUE }
         val groups = listOf(
-            "STREAMING" to ServerFarm.all.filter { it.speed != ServerSpeed.SLOW && !it.animeOnly },
-            "FILE INDEX" to ServerFarm.all.filter { it.speed == ServerSpeed.SLOW && !it.animeOnly },
-            "ANIME" to ServerFarm.all.filter { it.animeOnly },
+            "STREAMING" to ordered.filter { it.speed != ServerSpeed.SLOW && !it.animeOnly },
+            "FILE INDEX" to ordered.filter { it.speed == ServerSpeed.SLOW && !it.animeOnly },
+            "ANIME" to ordered.filter { it.animeOnly },
         )
         var animationIndex = 0
         for ((heading, specs) in groups) {
@@ -443,6 +513,7 @@ object SettingsUi {
                     if (spec.supports4k) add("4K")
                     if (spec.hasSubtitles) add("Subs")
                     if (spec.animeOnly) add("Anime")
+                    (priorityIndex[spec.id]?.plus(1))?.let { add("#$it") }
                 }
                 val speed = spec.speed.name.lowercase().replace('_', ' ')
                 val subtitle = "${spec.note} · $speed · ${if (spec.defaultEnabled) "default" else "optional"}"

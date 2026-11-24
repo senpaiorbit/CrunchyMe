@@ -204,6 +204,24 @@ object ServerFarm {
     fun defaultEnabledIds(): Set<String> =
         all.filter { it.defaultEnabled }.map { it.id }.toSet()
 
+    /** User-visible default order: the reliable stream APIs first, then everything else. */
+    fun defaultPriorityOrder(): List<String> {
+        val head = listOf(
+            "moviebox", "vidrift", "vidlink", "vidbolt", "vidly", "netmirror",
+            "vidy", "bingr", "movy", "atlantic",
+        )
+        val rank = mapOf(
+            ServerSpeed.VERY_FAST to 0,
+            ServerSpeed.FAST to 1,
+            ServerSpeed.NORMAL to 2,
+            ServerSpeed.SLOW to 3,
+        )
+        val rest = all.filterNot { it.id in head }
+            .sortedWith(compareBy({ rank[it.speed] ?: 2 }, { it.name.lowercase() }))
+            .map { it.id }
+        return (head + rest).distinct()
+    }
+
     fun urlFor(spec: ServerSpec, request: LinkRequest): String? {
         val template = if (request.isMovie) spec.movieUrl else spec.tvUrl
         val key = when (spec.keyType) {

@@ -24,10 +24,18 @@ import com.lagradost.cloudstream3.newTvSeriesSearchResponse
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.newExtractorLink
+import java.util.Collections
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 
 class CrunchyMeProvider : MainAPI() {
@@ -256,20 +264,8 @@ class CrunchyMeProvider : MainAPI() {
 
         val floor = Settings.qualityFloor()
         val started = System.currentTimeMillis()
-        val items = LinkCache.get(request) ?: run {
-            val raw = Sources.collect(request, Settings.sourceConfig())
-            val enriched = enrich(raw, floor).ifEmpty { enrich(raw, 0) }
-            LinkCache.put(request, enriched)
-            enriched
-        }
 
-        if (items.isEmpty()) {
-            Logx.w("CrunchyMe", "no playable streams for $title")
-            return false
-        }
-
-        var emitted = 0
-        for (candidate in items) {
+        suspend fun emit(candidate: Candidate) {
             val headers = LinkedHashMap(candidate.headers)
             if (headers.keys.none { it.equals("Referer", true) } && !candidate.referer.isNullOrBlank()) {
                 headers["Referer"] = candidate.referer.orEmpty()
@@ -292,7 +288,6 @@ class CrunchyMeProvider : MainAPI() {
                 mediaLabel = candidate.mediaLabel,
                 originalLanguage = request.originalLanguage,
             )
-
             callback(
                 newExtractorLink(
                     source = sourceLabel,
@@ -305,8 +300,6 @@ class CrunchyMeProvider : MainAPI() {
                     this.headers = headers
                 },
             )
-            emitted++
-
             candidate.subtitles.distinctBy { it.url }.forEach { subtitle ->
                 if (subtitle.url.isNotBlank()) {
                     subtitleCallback(
@@ -319,16 +312,57 @@ class CrunchyMeProvider : MainAPI() {
             }
         }
 
+        val cached = LinkCache.get(request)
+        if (cached != null) {
+            cached.forEach { emit(it) }
+            Logx.d("CrunchyMe", "emitted ${cached.size} cached links for $title")
+            return cached.isNotEmpty()
+        }
+
+        val config = Settings.sourceConfig()
+        val seen = ConcurrentHashMap.newKeySet<String>()
+        val collected = Collections.synchronizedList(mutableListOf<Candidate>())
+        val jobs = Collections.synchronizedList(mutableListOf<Job>())
+        val emitGate = Mutex()
+        val emitted = AtomicInteger(0)
+        val probeGate = Semaphore((config.parallelism / 2).coerceIn(2, 8))
+
+        coroutineScope {
+            Sources.stream(request, config) { _, raw ->
+                jobs += launch {
+                    val enriched = enrich(raw, floor, probeGate)
+                        .ifEmpty { enrich(raw, 0, probeGate) }
+                    if (enriched.isEmpty()) return@launch
+                    collected.addAll(enriched)
+                    emitGate.withLock {
+                        for (candidate in enriched) {
+                            if (!seen.add(candidate.url)) continue
+                            emit(candidate)
+                            emitted.incrementAndGet()
+                        }
+                    }
+                }
+            }
+            jobs.toList().joinAll()
+        }
+
+        val items = collected.toList().distinctBy { it.url }.sortedWith(
+            compareByDescending<Candidate> { it.qualityHint }.thenBy { it.sourceName },
+        )
+        LinkCache.put(request, items)
         Logx.d(
             "CrunchyMe",
-            "emitted $emitted/${items.size} links in ${System.currentTimeMillis() - started}ms",
+            "emitted ${emitted.get()}/${items.size} links in ${System.currentTimeMillis() - started}ms",
         )
-        return emitted > 0
+        return emitted.get() > 0
     }
 
-    private suspend fun enrich(candidates: List<Candidate>, floor: Int): List<Candidate> =
+    private suspend fun enrich(
+        candidates: List<Candidate>,
+        floor: Int,
+        gate: Semaphore = Semaphore(6),
+    ): List<Candidate> =
         coroutineScope {
-            val gate = Semaphore(6)
             candidates.distinctBy { it.url }.take(32).map { candidate ->
                 async {
                     gate.withPermit {

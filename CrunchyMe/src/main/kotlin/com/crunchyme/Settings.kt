@@ -8,6 +8,7 @@ object Settings {
     const val TMDB_LINK = "https://www.themoviedb.org/settings/api"
     const val OMDB_LINK = "https://www.omdbapi.com/apikey.aspx"
     const val DEFAULT_FLOOR = 720
+    const val DEFAULT_PARALLEL = 6
 
     private const val PREFS = "crunchyme_settings"
     private const val KEY_TMDB = "tmdb_key"
@@ -19,6 +20,8 @@ object Settings {
     private const val KEY_ADDONS = "addons"
     private const val KEY_PROVIDERS = "providers"
     private const val KEY_SERVERS = "servers"
+    private const val KEY_PRIORITY = "server_priority"
+    private const val KEY_PARALLEL = "parallel_tasks"
 
     @Volatile
     private var appContext: Context? = null
@@ -159,8 +162,56 @@ object Settings {
         LinkCache.clear()
     }
 
-    fun enabledServers(): List<ServerSpec> =
-        ServerFarm.all.filter { serverEnabled(it.id) }
+    /** Saved order first; unknown/new providers are appended in their default order. */
+    fun serverPriority(): List<String> {
+        val known = ServerFarm.all.map { it.id }
+        val saved = prefs()?.getString(KEY_PRIORITY, null)
+            .orEmpty()
+            .split(',')
+            .map { it.trim() }
+            .filter { it in known }
+            .distinct()
+        val base = if (saved.isEmpty()) ServerFarm.defaultPriorityOrder() else saved
+        return (base + ServerFarm.defaultPriorityOrder() + known).distinct()
+    }
+
+    fun saveServerPriority(order: List<String>) {
+        val known = ServerFarm.all.map { it.id }
+        prefs()?.edit()?.putString(
+            KEY_PRIORITY,
+            order.filter { it in known }.distinct().joinToString(","),
+        )?.apply()
+        LinkCache.clear()
+    }
+
+    fun moveServer(id: String, delta: Int) {
+        val order = serverPriority().toMutableList()
+        val index = order.indexOf(id)
+        if (index < 0) return
+        val target = (index + delta).coerceIn(0, order.lastIndex)
+        if (target == index) return
+        val item = order.removeAt(index)
+        order.add(target, item)
+        saveServerPriority(order)
+    }
+
+    fun resetServerPriority() {
+        prefs()?.edit()?.remove(KEY_PRIORITY)?.apply()
+        LinkCache.clear()
+    }
+
+    fun parallelLevel(): Int =
+        (prefs()?.getInt(KEY_PARALLEL, DEFAULT_PARALLEL) ?: DEFAULT_PARALLEL).coerceIn(1, 16)
+
+    fun saveParallelLevel(value: Int) {
+        prefs()?.edit()?.putInt(KEY_PARALLEL, value.coerceIn(1, 16))?.apply()
+    }
+
+    fun enabledServers(): List<ServerSpec> {
+        val order = serverPriority().withIndex().associate { it.value to it.index }
+        return ServerFarm.all.filter { serverEnabled(it.id) }
+            .sortedBy { order[it.id] ?: Int.MAX_VALUE }
+    }
 
     fun sourceConfig(): SourceConfig = SourceConfig(
         archiveEnabled = archiveEnabled(),
@@ -168,5 +219,6 @@ object Settings {
         addonUrls = addonUrls(),
         providers = providers(),
         servers = enabledServers(),
+        parallelism = parallelLevel(),
     )
 }

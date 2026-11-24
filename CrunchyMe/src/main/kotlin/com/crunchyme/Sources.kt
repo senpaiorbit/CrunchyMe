@@ -1,12 +1,11 @@
 package com.crunchyme
 
+import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
-import kotlinx.coroutines.Deferred
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 
@@ -22,6 +21,7 @@ data class SourceConfig(
     val addonUrls: List<String> = emptyList(),
     val providers: List<ProviderTemplate> = emptyList(),
     val servers: List<ServerSpec> = emptyList(),
+    val parallelism: Int = Settings.DEFAULT_PARALLEL,
 )
 
 /** A link returned by the CloudStream host-extractor registry, kept free of app types. */
@@ -111,53 +111,78 @@ object Sources {
 
     private const val SOURCE_TIMEOUT_MS = 45_000L
 
+    private data class Task(
+        val id: String,
+        val block: suspend () -> List<Candidate>,
+    )
+
+    /**
+     * Resolves sources in priority order and calls [onResult] as each one finishes.
+     * The first results can reach the player while slower providers are still running.
+     */
+    suspend fun stream(
+        request: LinkRequest,
+        config: SourceConfig,
+        log: (String) -> Unit = { Logx.d("Sources", it) },
+        onResult: suspend (String, List<Candidate>) -> Unit,
+    ) = supervisorScope {
+        val tasks = buildList {
+            for (spec in config.servers) {
+                if (!Health.isHealthy(spec.id)) continue
+                if (spec.animeOnly && !request.isAnime) continue
+                add(Task(spec.id) { BuiltinServerSource(spec).resolve(request) })
+            }
+            for (provider in config.providers.filter { it.enabled }) {
+                val id = CustomProviderSource.providerId(provider)
+                if (!Health.isHealthy(id)) continue
+                add(Task(id) { CustomProviderSource(provider).resolve(request) })
+            }
+            if (config.archiveEnabled && Health.isHealthy(ArchiveSource.ID)) {
+                add(Task(ArchiveSource.ID) { ArchiveSource.resolve(request) })
+            }
+            if (config.stremioEnabled &&
+                config.addonUrls.any { StremioSource.normalize(it) != null } &&
+                Health.isHealthy(StremioSource.ID)
+            ) {
+                add(Task(StremioSource.ID) { StremioSource.resolve(request, config.addonUrls) })
+            }
+        }
+
+        if (tasks.isEmpty()) {
+            log("no enabled sources")
+            return@supervisorScope
+        }
+
+        val queue = Channel<Task>(Channel.UNLIMITED)
+        tasks.forEach { queue.send(it) }
+        queue.close()
+
+        val workers = List(config.parallelism.coerceIn(1, 16)) {
+            launch {
+                for (task in queue) {
+                    val result = guard(task.id, log, task.block)
+                    if (result.isEmpty()) continue
+                    try {
+                        onResult(task.id, result)
+                    } catch (c: kotlinx.coroutines.CancellationException) {
+                        throw c
+                    } catch (t: Throwable) {
+                        log("${task.id}: result handler failed - ${t.javaClass.simpleName}")
+                    }
+                }
+            }
+        }
+        workers.joinAll()
+    }
+
     suspend fun collect(
         request: LinkRequest,
         config: SourceConfig,
         log: (String) -> Unit = { Logx.d("Sources", it) },
-    ): List<Candidate> = supervisorScope {
-        val jobs = mutableListOf<Deferred<List<Candidate>>>()
-        val gate = Semaphore(8)
-
-        if (config.archiveEnabled && Health.isHealthy(ArchiveSource.ID)) {
-            jobs += async {
-                gate.withPermit { guard(ArchiveSource.ID, log) { ArchiveSource.resolve(request) } }
-            }
-        }
-
-        if (config.stremioEnabled &&
-            config.addonUrls.any { StremioSource.normalize(it) != null } &&
-            Health.isHealthy(StremioSource.ID)
-        ) {
-            jobs += async {
-                gate.withPermit {
-                    guard(StremioSource.ID, log) { StremioSource.resolve(request, config.addonUrls) }
-                }
-            }
-        }
-
-        for (spec in config.servers) {
-            if (!Health.isHealthy(spec.id)) continue
-            if (spec.animeOnly && !request.isAnime) continue
-            jobs += async {
-                gate.withPermit { guard(spec.id, log) { BuiltinServerSource(spec).resolve(request) } }
-            }
-        }
-
-        for (provider in config.providers.filter { it.enabled }) {
-            val id = CustomProviderSource.providerId(provider)
-            if (!Health.isHealthy(id)) continue
-            jobs += async {
-                gate.withPermit { guard(id, log) { CustomProviderSource(provider).resolve(request) } }
-            }
-        }
-
-        if (jobs.isEmpty()) {
-            log("no enabled sources")
-            return@supervisorScope emptyList()
-        }
-
-        jobs.awaitAll().flatten().distinctBy { it.url }
+    ): List<Candidate> {
+        val all = Collections.synchronizedList(mutableListOf<Candidate>())
+        stream(request, config, log) { _, items -> all.addAll(items) }
+        return all.toList().distinctBy { it.url }
     }
 
     private suspend fun guard(
