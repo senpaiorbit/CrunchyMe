@@ -25,7 +25,7 @@ class ServerFarmTest {
     @Test
     fun serverIdsAreUnique() {
         val ids = ServerFarm.all.map { it.id }
-        assertEquals(18, ids.size)
+        assertEquals(21, ids.size)
         assertEquals(ids.size, ids.distinct().size)
     }
 
@@ -63,9 +63,9 @@ class ServerFarmTest {
         val defaults = ServerFarm.defaultEnabledIds()
         listOf(
             "vidy", "vidbolt", "vidly", "vidlink", "moviebox", "netmirror",
-            "bingr", "vidrift", "movy", "atlantic", "animeworld", "hianime",
+            "bingr", "vidrift", "movy", "atlantic", "animeworld", "toonix_anime", "hianime",
         ).forEach { assertTrue(it in defaults, "expected $it to be on by default") }
-        listOf("4khdhub", "fsl", "hindmoviez", "hdhub4u", "moviesdrive", "movies4u")
+        listOf("4khdhub", "fsl", "hindmoviez", "hdhub4u", "moviesdrive", "movies4u", "netnaija", "toonix")
             .forEach { assertFalse(it in defaults) }
     }
 }

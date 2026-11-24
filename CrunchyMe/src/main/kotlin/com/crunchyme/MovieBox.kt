@@ -8,7 +8,10 @@ object MovieBox {
 
     private const val BASE = "https://h5-api.aoneroom.com"
     private const val H5 = "https://h5.aoneroom.com"
-    private const val REFERER = "https://movieboxonline.net/"
+    private const val MOVIEBOX_SITE = "https://movieboxonline.net"
+    private const val NETNAIJA_SITE = "https://netnaija.film"
+    private const val MOVIEBOX_SOURCE = "webMovieBoxSite"
+    private const val NETNAIJA_SOURCE = "webNetnaijaSite"
     private const val TOKEN_TTL_MS = 30 * 60 * 1000L
 
     private val SEASON_END = Regex("""(?i)\bS(?:eason)?\s*0?(\d{1,2})(?:\s*[-–]\s*S?0?(\d{1,2}))?\b""")
@@ -19,16 +22,27 @@ object MovieBox {
     @Volatile private var token: String? = null
     @Volatile private var tokenAt: Long = 0L
 
-    suspend fun resolve(spec: ServerSpec, request: LinkRequest): List<Candidate> {
+    suspend fun resolve(spec: ServerSpec, request: LinkRequest): List<Candidate> =
+        resolve(spec, request, MOVIEBOX_SITE, MOVIEBOX_SOURCE)
+
+    suspend fun resolveNetNaija(spec: ServerSpec, request: LinkRequest): List<Candidate> =
+        resolve(spec, request, NETNAIJA_SITE, NETNAIJA_SOURCE)
+
+    private suspend fun resolve(
+        spec: ServerSpec,
+        request: LinkRequest,
+        site: String,
+        source: String,
+    ): List<Candidate> {
         val title = request.title.trim()
         if (title.isBlank()) return emptyList()
-        val bearer = bearer(false) ?: return emptyList()
+        val bearer = bearer(false, site, source) ?: return emptyList()
         val subjectType = if (request.isMovie) 1 else 2
-        var items = search(title, subjectType, bearer)
+        var items = search(title, subjectType, bearer, site, source)
         if (items.length() == 0) {
             token = null
-            val fresh = bearer(true) ?: return emptyList()
-            items = search(title, subjectType, fresh)
+            val fresh = bearer(true, site, source) ?: return emptyList()
+            items = search(title, subjectType, fresh, site, source)
         }
         if (items.length() == 0) return emptyList()
 
@@ -59,24 +73,28 @@ object MovieBox {
         val out = LinkedHashMap<String, Candidate>()
         for (subject in subjects.take(6)) {
             if (!request.isMovie && subject.seasonEnd in 1 until request.season) continue
-            val detailPath = subject.detailPath.ifBlank { detailPath(subject.id) }
+            val detailPath = subject.detailPath.ifBlank { detailPath(subject.id, site, source) }
             if (detailPath.isBlank()) continue
+            val encodedPath = java.net.URLEncoder.encode(detailPath, "UTF-8")
             val params = buildString {
                 append("subjectId=").append(subject.id)
-                if (!request.isMovie) append("&se=").append(request.season).append("&ep=").append(request.episode)
-                append("&detailPath=").append(detailPath)
+                append("&se=").append(if (request.isMovie) 0 else request.season)
+                append("&ep=").append(if (request.isMovie) 0 else request.episode)
+                append("&detailPath=").append(encodedPath)
             }
-            val playHeaders = headers(bearer).toMutableMap().apply {
-                put("Referer", "https://fmoviesunblocked.net/spa/videoPlayPage/movies/$detailPath?id=${subject.id}&type=/movie/detail")
-                put("Origin", "https://fmoviesunblocked.net")
+            val playHeaders = headers(bearer, site, source).toMutableMap().apply {
+                put("Referer", "$site/videoPlayPage/$detailPath")
+                put("Origin", site)
             }
             val play = requestJson("$BASE/wefeed-h5api-bff/subject/play?$params", playHeaders)
             val download = requestJson("$BASE/wefeed-h5api-bff/subject/download?$params", playHeaders)
             for (root in listOfNotNull(play, download)) {
                 val data = unwrap(root)
-                addStreams(spec, out, data.optJSONArray("streams"), request, subject.language, playHeaders, false)
-                addStreams(spec, out, data.optJSONArray("dash"), request, subject.language, playHeaders, true)
-                addStreams(spec, out, data.optJSONArray("downloads"), request, subject.language, playHeaders, false)
+                val maxResolution = data.optJSONObject("playConfig")?.optInt("maxResolution", 0) ?: 0
+                addStreams(spec, out, data.optJSONArray("streams"), request, subject.language, playHeaders, site, null, maxResolution)
+                addStreams(spec, out, data.optJSONArray("hls"), request, subject.language, playHeaders, site, MediaKind.HLS, 0)
+                addStreams(spec, out, data.optJSONArray("dash"), request, subject.language, playHeaders, site, MediaKind.DASH, 0)
+                addStreams(spec, out, data.optJSONArray("downloads"), request, subject.language, playHeaders, site, null, 0)
             }
             if (out.size >= 12) break
         }
@@ -85,13 +103,13 @@ object MovieBox {
 
     private data class Subject(val id: String, val detailPath: String, val seasonEnd: Int, val language: String)
 
-    private suspend fun bearer(force: Boolean): String? {
+    private suspend fun bearer(force: Boolean, site: String, source: String): String? {
         if (!force) {
             token?.takeIf { System.currentTimeMillis() - tokenAt < TOKEN_TTL_MS }?.let { return it }
         }
         val response = Http.request(
             "$BASE/wefeed-h5api-bff/app/get-latest-app-pkgs?app_name=moviebox",
-            headers(null),
+            headers(null, site, source),
             10,
         ) ?: return null
         val raw = response.headers.entries.firstOrNull { it.key.equals("x-user", true) }?.value ?: return null
@@ -102,7 +120,13 @@ object MovieBox {
         return fresh
     }
 
-    private suspend fun search(title: String, subjectType: Int, bearer: String): JSONArray {
+    private suspend fun search(
+        title: String,
+        subjectType: Int,
+        bearer: String,
+        site: String,
+        source: String,
+    ): JSONArray {
         val body = JSONObject()
             .put("keyword", title)
             .put("page", 1)
@@ -112,7 +136,7 @@ object MovieBox {
         val raw = Http.post(
             "$BASE/wefeed-h5api-bff/subject/search",
             body,
-            headers(bearer),
+            headers(bearer, site, source),
             "application/json; charset=utf-8",
             15,
         ) ?: return JSONArray()
@@ -120,10 +144,10 @@ object MovieBox {
         return unwrap(root).optJSONArray("items") ?: JSONArray()
     }
 
-    private suspend fun detailPath(subjectId: String): String {
+    private suspend fun detailPath(subjectId: String, site: String, source: String): String {
         val raw = Http.text(
             "$H5/wefeed-h5-bff/web/post/list/subject?id=$subjectId",
-            headers(token),
+            headers(token, site, source),
             8,
         ) ?: return ""
         return runCatching {
@@ -145,29 +169,46 @@ object MovieBox {
         request: LinkRequest,
         language: String,
         headers: Map<String, String>,
-        dash: Boolean,
+        site: String,
+        forceKind: MediaKind?,
+        maxResolution: Int,
     ) {
         if (array == null) return
         for (index in 0 until array.length()) {
             val item = array.optJSONObject(index) ?: continue
             if (item.optBoolean("vipLocked", false)) continue
-            val url = item.optString("url").trim().takeIf { it.startsWith("http") } ?: continue
+            val rawUrl = item.optString("url").trim()
+            val signCookie = item.optString("signCookie")
+            val policyUrl = policyResource(signCookie)
+            val url = (policyUrl ?: rawUrl).takeIf { it.startsWith("http") } ?: continue
             if (url.contains("macdn.aoneroom.com/other/", true)) continue
             val resolution = item.optString("resolutions").toIntOrNull()
                 ?: item.optInt("resolution", 0)
-            if (resolution in 1..719) continue
-            val isDash = dash || url.contains(".mpd", true)
-            val cookie = cloudFrontCookie(item.optString("signCookie"))
+            if (maxResolution > 0 && resolution > maxResolution) continue
+            val kind = forceKind ?: when {
+                url.contains(".mpd", true) -> MediaKind.DASH
+                url.contains(".m3u8", true) -> MediaKind.HLS
+                else -> ProviderSupport.kind(url)
+            }
             val streamHeaders = headers.toMutableMap().apply {
-                cookie?.let { put("Cookie", it) }
+                remove("Authorization")
+                remove("Cookie")
+                put("Accept", "*/*")
+                put("Referer", "$site/")
+                put("Origin", site)
+                val signHeaderKey = item.optString("signHeaderKey").trim()
+                if (signHeaderKey.isNotBlank() && signCookie.isNotBlank()) {
+                    put(signHeaderKey, signCookie)
+                }
+                cloudFrontCookie(signCookie)?.takeIf { it.isNotBlank() }?.let { put("Cookie", it) }
             }
             if (!out.containsKey(url)) {
                 out[url] = Candidate(
                     sourceId = spec.id,
                     sourceName = spec.name,
                     url = url,
-                    kind = if (isDash) MediaKind.DASH else ProviderSupport.kind(url),
-                    referer = REFERER,
+                    kind = if (policyUrl != null) MediaKind.DASH else kind,
+                    referer = site,
                     headers = streamHeaders,
                     qualityHint = resolution,
                     audioLabel = language,
@@ -182,13 +223,32 @@ object MovieBox {
         return data.optJSONObject("data") ?: data
     }
 
-    private fun headers(bearer: String?): Map<String, String> = buildMap {
+    private fun headers(bearer: String?, site: String, source: String): Map<String, String> = buildMap {
         put("User-Agent", Http.UA)
         put("Accept", "application/json")
-        put("Referer", REFERER)
+        put("Origin", site)
+        put("Referer", "$site/")
+        put("X-Request-Lang", "en")
         put("X-Client-Info", "{\"timezone\":\"Asia/Calcutta\"}")
         put("Accept-Language", "en-US,en;q=0.9")
-        bearer?.takeIf { it.isNotBlank() }?.let { put("Authorization", "Bearer $it") }
+        put("X-Source", source)
+        bearer?.takeIf { it.isNotBlank() }?.let {
+            put("Authorization", "Bearer $it")
+            put("Cookie", "token=$it")
+        }
+    }
+
+    private fun policyResource(signCookie: String?): String? {
+        if (signCookie.isNullOrBlank()) return null
+        Regex("""Edge-Cache-Cookie=urlprefix=([^:;\s]+)""").find(signCookie)?.groupValues?.get(1)?.let { encoded ->
+            B64.decodeText(encoded)?.trimEnd('/')?.let { return "$it/index.mpd" }
+        }
+        val policy = Regex("""CloudFront-Policy=([^;]+)""").find(signCookie)?.groupValues?.get(1) ?: return null
+        val decoded = B64.decodeText(policy) ?: return null
+        val resource = runCatching {
+            JSONObject(decoded).optJSONArray("Statement")?.optJSONObject(0)?.optString("Resource")
+        }.getOrNull()?.trimEnd('*', '/') ?: return null
+        return if (resource.endsWith(".mpd", true)) resource else "$resource/index.mpd"
     }
 
     private fun cloudFrontCookie(signCookie: String?): String? {

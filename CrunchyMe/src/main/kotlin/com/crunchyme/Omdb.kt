@@ -5,6 +5,8 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import org.json.JSONObject
 
 /**
@@ -128,8 +130,10 @@ object Omdb {
             listOf(1)
         }
         return coroutineScope {
-            seasons.map { season -> async { seasonEpisodes(imdbId, season) } }
-                .awaitAll()
+            val gate = Semaphore(4)
+            seasons.map { season ->
+                async { gate.withPermit { seasonEpisodes(imdbId, season) } }
+            }.awaitAll()
                 .flatten()
                 .sortedWith(compareBy({ it.season }, { it.number }))
         }

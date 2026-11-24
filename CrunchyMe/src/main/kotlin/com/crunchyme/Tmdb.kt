@@ -5,6 +5,8 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -212,8 +214,10 @@ object Tmdb {
         val seasons = detail.seasonNumbers.ifEmpty {
             (1..detail.numberOfSeasons.coerceAtLeast(0)).toList()
         }
-        seasons.map { season -> async { seasonEpisodes(tmdbId, season) } }
-            .awaitAll()
+        val gate = Semaphore(4)
+        seasons.map { season ->
+            async { gate.withPermit { seasonEpisodes(tmdbId, season) } }
+        }.awaitAll()
             .flatten()
             .sortedWith(compareBy({ it.season }, { it.number }))
     }

@@ -252,12 +252,32 @@ object SettingsUi {
     }
 
     private fun playback(ui: Ui, body: LinearLayout, rerender: (Section) -> Unit) {
+        val catalogCard = ui.card()
+        catalogCard.addView(ui.sectionLabel("CATALOG & METADATA"))
+        catalogCard.addView(
+            ui.label(
+                "TMDB is the default catalog. Switch to IMDb to use OMDb for search, home rows, " +
+                    "details and episode lists. Playback sources are unchanged.",
+                13f, TEXT_DIM,
+            ).apply { setPadding(0, ui.dp(6), 0, ui.dp(12)) },
+        )
+        val catalogChips = LinearLayout(ui.context).apply { orientation = LinearLayout.HORIZONTAL }
+        CatalogProvider.entries.forEach { provider ->
+            catalogChips.addView(ui.chip(provider.label, Settings.catalogProvider() == provider) {
+                Settings.saveCatalogProvider(provider)
+                ui.toast("${provider.label} catalog selected")
+                rerender(Section.PLAYBACK)
+            })
+        }
+        catalogCard.addView(catalogChips)
+        body.addView(catalogCard)
+
         val keyCard = ui.card()
         keyCard.addView(ui.sectionLabel("TMDB V3 KEY"))
         val saved = Settings.tmdbKey()
         keyCard.addView(
             ui.label(
-                if (saved == null) "No key saved. Search and catalog stay empty." else "Saved · ${mask(saved)}",
+                if (saved == null) "No key saved. IMDb/OMDb is used automatically." else "Saved · ${mask(saved)}",
                 13f, TEXT_DIM,
             ).apply { setPadding(0, ui.dp(6), 0, ui.dp(10)) },
         )
@@ -301,8 +321,8 @@ object SettingsUi {
         imdbCard.addView(ui.sectionLabel("IMDb CATALOG · OMDb"))
         imdbCard.addView(
             ui.label(
-                "Search, IMDb IDs, posters and TV episode lists work without a TMDB key. " +
-                    "TMDB still powers the trending rows.",
+                "OMDb powers the IMDb catalog option above. It also keeps search, IMDb IDs, " +
+                    "posters and TV episode lists working without a TMDB key.",
                 13f, TEXT_DIM,
             ).apply { setPadding(0, ui.dp(6), 0, ui.dp(10)) },
         )

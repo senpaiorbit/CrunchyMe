@@ -57,6 +57,7 @@ class CrunchyMeProvider : MainAPI() {
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse? {
+        if (catalog() == CatalogProvider.IMDB) return imdbHome(request)
         if (!Tmdb.hasKey()) return null
         val items = Tmdb.row(request.data, page) ?: return null
         val cards = items.mapNotNull { it.toCard() }
@@ -66,25 +67,60 @@ class CrunchyMeProvider : MainAPI() {
 
     override suspend fun search(query: String): List<SearchResponse>? {
         if (query.isBlank()) return null
+        if (catalog() == CatalogProvider.IMDB) {
+            return Omdb.search(query).mapNotNull { it.toCard() }.takeIf { it.isNotEmpty() }
+        }
         val tmdb = if (Tmdb.hasKey()) Tmdb.search(query) else null
         if (!tmdb.isNullOrEmpty()) {
             return tmdb.mapNotNull { it.toCard() }.takeIf { it.isNotEmpty() }
         }
-        val imdb = Omdb.search(query)
-        return imdb.mapNotNull { it.toCard() }.takeIf { it.isNotEmpty() }
+        return Omdb.search(query).mapNotNull { it.toCard() }.takeIf { it.isNotEmpty() }
     }
 
     override suspend fun quickSearch(query: String): List<SearchResponse>? = search(query)
 
     override suspend fun load(url: String): LoadResponse? {
         val ref = Refs.parse(url) ?: return null
-        val tmdbDetail = ref.tmdbId?.takeIf { Tmdb.hasKey() }?.let { Tmdb.detail(it, ref.type) }
-        if (tmdbDetail != null) return tmdbLoad(url, ref, tmdbDetail)
-
+        if (catalog() == CatalogProvider.TMDB) {
+            val tmdbDetail = ref.tmdbId?.takeIf { Tmdb.hasKey() }?.let { Tmdb.detail(it, ref.type) }
+            if (tmdbDetail != null) return tmdbLoad(url, ref, tmdbDetail)
+        }
         val imdbId = ref.imdbId ?: return null
         val omdb = Omdb.detail(imdbId) ?: return null
         return omdbLoad(url, omdb)
     }
+
+    /** TMDB is the default. IMDb uses OMDb and falls back automatically when no TMDB key is set. */
+    private fun catalog(): CatalogProvider =
+        if (Settings.catalogProvider() == CatalogProvider.IMDB || !Tmdb.hasKey()) {
+            CatalogProvider.IMDB
+        } else {
+            CatalogProvider.TMDB
+        }
+
+    private suspend fun imdbHome(request: MainPageRequest): HomePageResponse? {
+        val query = IMDB_HOME[request.data] ?: return null
+        val cards = Omdb.search(query).mapNotNull { it.toCard() }
+        if (cards.isEmpty()) return null
+        return newHomePageResponse(request, cards)
+    }
+
+    private val IMDB_HOME = mapOf(
+        "trending_movie" to "Avengers",
+        "trending_tv" to "Stranger Things",
+        "popular_movie" to "Batman",
+        "popular_tv" to "Wednesday",
+        "top_movie" to "Godfather",
+        "top_tv" to "Breaking Bad",
+        "upcoming_movie" to "2026",
+        "airing_tv" to "The",
+        "hindi" to "Hindi",
+        "tamil" to "Tamil",
+        "telugu" to "Telugu",
+        "malayalam" to "Malayalam",
+        "kannada" to "Kannada",
+        "bengali" to "Bengali",
+    )
 
     private suspend fun tmdbLoad(
         url: String,
@@ -214,13 +250,15 @@ class CrunchyMeProvider : MainAPI() {
             title = title,
             year = tmdbDetail?.year ?: omdbDetail?.year,
             originalLanguage = tmdbDetail?.originalLanguage,
+            isAnime = (tmdbDetail?.genres ?: omdbDetail?.genres).orEmpty()
+                .any { it.equals("Animation", true) || it.equals("Anime", true) },
         )
 
         val floor = Settings.qualityFloor()
         val started = System.currentTimeMillis()
         val items = LinkCache.get(request) ?: run {
             val raw = Sources.collect(request, Settings.sourceConfig())
-            val enriched = enrich(raw, floor)
+            val enriched = enrich(raw, floor).ifEmpty { enrich(raw, 0) }
             LinkCache.put(request, enriched)
             enriched
         }
@@ -291,7 +329,7 @@ class CrunchyMeProvider : MainAPI() {
     private suspend fun enrich(candidates: List<Candidate>, floor: Int): List<Candidate> =
         coroutineScope {
             val gate = Semaphore(6)
-            candidates.map { candidate ->
+            candidates.distinctBy { it.url }.take(32).map { candidate ->
                 async {
                     gate.withPermit {
                         runCatching { MediaProbe.enrich(candidate, floor) }.getOrElse { candidate }

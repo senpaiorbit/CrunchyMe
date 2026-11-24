@@ -72,6 +72,14 @@ object ServerFarm {
             supports4k = true, hasSubtitles = true,
         ),
         ServerSpec(
+            id = "netnaija", name = "NetNaija",
+            movieUrl = "https://netnaija.film/",
+            tvUrl = "https://netnaija.film/",
+            referer = "https://netnaija.film/", kind = ServerKind.JSON, keyType = KeyType.TITLE,
+            timeoutSec = 60, note = "MovieBox alternative", defaultEnabled = false,
+            speed = ServerSpeed.FAST, supports4k = true, hasSubtitles = true,
+        ),
+        ServerSpec(
             id = "netmirror", name = "NetMirror",
             movieUrl = "https://net78.cc/api/embed-tmdb/{id}?type=movie",
             tvUrl = "https://net78.cc/api/embed-tmdb/{id}?type=tv&se={season}&ep={episode}",
@@ -166,6 +174,22 @@ object ServerFarm {
             speed = ServerSpeed.NORMAL,
         ),
         ServerSpec(
+            id = "toonix", name = "Toonix",
+            movieUrl = "https://toonix.bond/watch/{title}",
+            tvUrl = "https://toonix.bond/show/{title}/{season}/{episode}",
+            referer = "https://toonix.bond/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
+            timeoutSec = 40, note = "Cartoons & movies", defaultEnabled = false,
+            speed = ServerSpeed.NORMAL, hasSubtitles = true,
+        ),
+        ServerSpec(
+            id = "toonix_anime", name = "Toonix Anime",
+            movieUrl = "https://toonix.bond/watch/{title}",
+            tvUrl = "https://toonix.bond/show/{title}/{season}/{episode}",
+            referer = "https://toonix.bond/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
+            timeoutSec = 40, note = "Anime", animeOnly = true,
+            speed = ServerSpeed.NORMAL, hasSubtitles = true,
+        ),
+        ServerSpec(
             id = "hianime", name = "HiAnime",
             movieUrl = "https://hianime.at/search?keyword={title}",
             tvUrl = "https://hianime.at/search?keyword={title}",
@@ -212,6 +236,7 @@ class BuiltinServerSource(private val spec: ServerSpec) : StreamSource {
             "vidly" -> Vidly.resolve(spec, request)
             "vidlink" -> VidLink.resolve(spec, request)
             "moviebox" -> MovieBox.resolve(spec, request)
+            "netnaija" -> MovieBox.resolveNetNaija(spec, request)
             "netmirror" -> NetMirror.resolve(spec, request)
             "bingr" -> Bingr.resolve(spec, request)
             "vidrift" -> Vidrift.resolve(spec, request)
@@ -220,6 +245,7 @@ class BuiltinServerSource(private val spec: ServerSpec) : StreamSource {
             "4khdhub", "fsl", "hindmoviez", "hdhub4u", "moviesdrive" -> FileIndex.resolve(spec, request)
             "movies4u" -> Movies4u.resolve(spec, request)
             "animeworld" -> AnimeWorld.resolve(spec, request)
+            "toonix", "toonix_anime" -> Toonix.resolve(spec, request)
             "hianime" -> HiAnime.resolve(spec, request)
             else -> if (spec.kind == ServerKind.JSON) {
                 JsonResolver.resolve(spec, request)

@@ -5,6 +5,8 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 
@@ -115,10 +117,11 @@ object Sources {
         log: (String) -> Unit = { Logx.d("Sources", it) },
     ): List<Candidate> = supervisorScope {
         val jobs = mutableListOf<Deferred<List<Candidate>>>()
+        val gate = Semaphore(8)
 
         if (config.archiveEnabled && Health.isHealthy(ArchiveSource.ID)) {
             jobs += async {
-                guard(ArchiveSource.ID, log) { ArchiveSource.resolve(request) }
+                gate.withPermit { guard(ArchiveSource.ID, log) { ArchiveSource.resolve(request) } }
             }
         }
 
@@ -127,14 +130,17 @@ object Sources {
             Health.isHealthy(StremioSource.ID)
         ) {
             jobs += async {
-                guard(StremioSource.ID, log) { StremioSource.resolve(request, config.addonUrls) }
+                gate.withPermit {
+                    guard(StremioSource.ID, log) { StremioSource.resolve(request, config.addonUrls) }
+                }
             }
         }
 
         for (spec in config.servers) {
             if (!Health.isHealthy(spec.id)) continue
+            if (spec.animeOnly && !request.isAnime) continue
             jobs += async {
-                guard(spec.id, log) { BuiltinServerSource(spec).resolve(request) }
+                gate.withPermit { guard(spec.id, log) { BuiltinServerSource(spec).resolve(request) } }
             }
         }
 
@@ -142,7 +148,7 @@ object Sources {
             val id = CustomProviderSource.providerId(provider)
             if (!Health.isHealthy(id)) continue
             jobs += async {
-                guard(id, log) { CustomProviderSource(provider).resolve(request) }
+                gate.withPermit { guard(id, log) { CustomProviderSource(provider).resolve(request) } }
             }
         }
 
@@ -225,15 +231,21 @@ object Health {
 /** Keeps resolved links warm for a few minutes so re-opening an episode is instant. */
 object LinkCache {
 
-    private const val TTL_MS = 10 * 60 * 1000L
+    private const val TTL_MS = 2 * 60 * 1000L
     private const val MAX_ENTRIES = 32
 
     private data class Entry(val at: Long, val items: List<Candidate>)
 
     private val entries = ConcurrentHashMap<String, Entry>()
 
-    private fun key(request: LinkRequest): String =
-        "${request.tmdbId}|${request.type}|${request.season}|${request.episode}"
+    private fun key(request: LinkRequest): String = listOf(
+        request.tmdbId,
+        request.imdbId.orEmpty(),
+        TitleMatch.normalize(request.title),
+        request.type,
+        request.season,
+        request.episode,
+    ).joinToString("|")
 
     fun get(request: LinkRequest): List<Candidate>? {
         val entry = entries[key(request)] ?: return null

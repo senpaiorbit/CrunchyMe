@@ -2,7 +2,7 @@
 
 CrunchyMe is a CloudStream 3 provider built around one idea: **metadata and playback are separate problems**.
 
-TMDB provides the catalog, search, artwork and episode list. Playback is resolved by a small
+TMDB or IMDb/OMDb provides the catalog, search, artwork and episode list. Playback is resolved by a small
 "stream farm" that can run several independent sources in parallel and pick the best playable
 result. The farm is deliberately pluggable: a legal public-domain archive is built in, Stremio/Nuvio
 addons can be attached from settings, and new providers can be added as URL templates without
@@ -57,10 +57,11 @@ bundled into the plugin and never sent anywhere except `api.themoviedb.org`.
 
 | Setting | What it does |
 | --- | --- |
-| TMDB API key | Enables catalog, search, details and episodes. |
+| Catalog provider | **TMDB** (default) or **IMDb**. IMDb uses OMDb and works without a TMDB key. |
+| TMDB API key | Enables the TMDB catalog, search, details and episodes. |
 | Minimum quality | Drops streams whose height is *known* to be below the floor (480p / 720p / 1080p / Any). Unknown heights are kept. |
 | Internet Archive | Built-in legal source for public-domain films. |
-| Built-in servers | Turn individual providers on or off (VidBolt, Vidrift, Vidly, Bingr, NetMirror, Atlantic). |
+| Built-in servers | Turn individual providers on or off (VidBolt, Vidrift, Vidly, Bingr, NetMirror, MovieBox, NetNaija, Toonix, …). |
 | Stremio / Nuvio addons | Enables the addon source. |
 | Custom providers | Enable/disable or remove user-defined templates. |
 | Clear caches | Drops TMDB, link and addon-manifest caches. |
@@ -79,8 +80,9 @@ bundled into the plugin and never sent anywhere except `api.themoviedb.org`.
      `TYPE=SUBTITLES` tracks.
    - DASH: reads `<Representation height>` and audio `lang`.
    - MP4/MKV: issues a `Range` request and parses the `moov → trak → tkhd` box for the real height.
-6. Candidates below the quality floor (when the height is known) are dropped. The rest are
-   deduplicated, sorted by height, cached for 10 minutes, and emitted with the right
+6. Candidates below the quality floor (when the height is known) are dropped. If every
+   candidate is below the floor, the best low-quality candidate is kept instead of returning
+   nothing. The rest are deduplicated, sorted by height, cached for 2 minutes, and emitted with the right
    `Referer`/headers and subtitle tracks.
 
 ## Sources
@@ -96,7 +98,7 @@ The resolver searches `advancedsearch.php`, ranks results by title and year, the
 
 ### Built-in servers
 
-The provider ships with six optional servers. They are queried in parallel with the rest of the
+The provider ships with twenty optional servers. They are queried in parallel with the rest of the
 farm, and each one has its own timeout and circuit breaker.
 
 | Server | Mode | Default | Notes |
@@ -107,6 +109,10 @@ farm, and each one has its own timeout and circuit breaker.
 | Bingr | Embed | on | Extracts `master.m3u8` URLs from the watch page. Cloudflare may challenge this host. |
 | NetMirror | JSON API | on | Reads `streams[]` and `mp4`; uses the `videodownloader.site` referer required by the file CDN. |
 | Atlantic | JSON API | off | Tries the `stream.hls.lol` provider endpoints, then the legacy CDN. Rate-limited on some networks. |
+| MovieBox | JSON API | on | H5 API: bootstrap token, search, play/download. Keeps signed MP4 URLs and the `signHeaderKey`/`signCookie` headers. Falls back to the mobile API. |
+| NetNaija | JSON API | off | MovieBox API with the NetNaija site/source. Use it when MovieBox is region-blocked. |
+| Toonix | Embed | off | Parses the Next.js RSC/flight payload, `legacySrc`, `/api/stream/s/…` and Hydrax sources. Cartoons and movies. |
+| Toonix Anime | Embed | on | Same resolver for anime titles; runs only when TMDB/OMDb genres include Animation/Anime. |
 
 Enable or disable any of them in **Settings → Providers**. If a server is slow or blocked, turn it
 off; the remaining sources still run. The health breaker also disables a repeatedly failing server
@@ -198,7 +204,7 @@ private object MySource {
   cannot be fingerprinted as easily as a headless browser.
 - **Per-source timeouts** (30 s farm, 12 s per addon, 6–20 s per HTTP call) and a circuit breaker
   that disables a source after four consecutive failures for five minutes.
-- **Caching**: TMDB 15 min, resolved links 10 min, addon manifests 6 h. Re-opening an episode is
+- **Caching**: TMDB 15 min, resolved links 2 min (signed MovieBox URLs expire quickly), addon manifests 6 h. Re-opening an episode is
   instant and does not re-hit the network.
 - **Declared evidence only.** Audio languages come from names, native scripts, ISO codes or
   BCP-47 tags. Bare two-letter codes are ignored in free text so titles like *It*, *Up* or *Us*
@@ -254,7 +260,7 @@ Test coverage:
 
 | Symptom | Fix |
 | --- | --- |
-| Home rows are empty | Add a TMDB v3 key in CrunchyMe settings and tap **Test**. |
+| Home rows are empty | Add a TMDB v3 key in CrunchyMe settings and tap **Test**, or switch **Catalog provider** to **IMDb**. |
 | Search returns nothing | Same as above; check the key is the 32-character v3 key. |
 | "No playable streams" | Check **Settings → Providers**; enable VidBolt/Vidrift/Vidly, add a Stremio addon, or add a custom provider. Not every title is available. |
 | Only low quality appears | Lower the minimum quality; some archive files are 480p. |

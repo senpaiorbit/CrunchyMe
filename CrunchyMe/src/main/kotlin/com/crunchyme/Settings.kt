@@ -11,6 +11,7 @@ object Settings {
 
     private const val PREFS = "crunchyme_settings"
     private const val KEY_TMDB = "tmdb_key"
+    private const val KEY_CATALOG = "catalog_provider"
     private const val KEY_OMDB = "omdb_key"
     private const val KEY_FLOOR = "quality_floor"
     private const val KEY_ARCHIVE = "archive_enabled"
@@ -38,6 +39,20 @@ object Settings {
 
     fun saveTmdbKey(value: String) {
         prefs()?.edit()?.putString(KEY_TMDB, value.trim())?.apply()
+    }
+
+    fun catalogProvider(): CatalogProvider = when (
+        prefs()?.getString(KEY_CATALOG, null)?.lowercase()
+    ) {
+        "imdb" -> CatalogProvider.IMDB
+        else -> CatalogProvider.TMDB
+    }
+
+    fun saveCatalogProvider(provider: CatalogProvider) {
+        prefs()?.edit()?.putString(KEY_CATALOG, provider.name)?.apply()
+        Tmdb.clearCache()
+        Omdb.clearCache()
+        LinkCache.clear()
     }
 
     fun isValidTmdbKey(value: String): Boolean {

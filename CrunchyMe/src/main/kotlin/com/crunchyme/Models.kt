@@ -2,6 +2,8 @@ package com.crunchyme
 
 enum class MediaKind { HLS, DASH, FILE }
 
+enum class CatalogProvider(val label: String) { TMDB("TMDB"), IMDB("IMDb") }
+
 data class SubtitleTrack(val language: String, val url: String)
 
 /** A playable stream candidate produced by one source, before manifest probing. */
@@ -31,6 +33,7 @@ data class LinkRequest(
     val title: String,
     val year: Int?,
     val originalLanguage: String?,
+    val isAnime: Boolean = false,
 ) {
     val isMovie: Boolean get() = type == "movie"
     val hasEpisode: Boolean get() = season > 0 && episode > 0
