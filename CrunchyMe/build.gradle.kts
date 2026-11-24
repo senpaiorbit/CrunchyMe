@@ -1,4 +1,4 @@
-version = 1
+version = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
 
 plugins {
     id("com.lagradost.cloudstream3.gradle")

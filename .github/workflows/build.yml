@@ -65,6 +65,19 @@ jobs:
           find "$GITHUB_WORKSPACE/src" -name 'plugins.json' -exec cp {} "$GITHUB_WORKSPACE/builds/" \;
           python3 - <<'PY'
           import json, os
+          path = os.path.join(os.environ["GITHUB_WORKSPACE"], "builds", "plugins.json")
+          with open(path) as f:
+              plugins = json.load(f)
+          tag = os.environ.get("GITHUB_SHA", "dev")[:12]
+          for plugin in plugins:
+              url = plugin.get("url", "")
+              if url and "?" not in url:
+                  plugin["url"] = f"{url}?v={tag}"
+          with open(path, "w") as f:
+              json.dump(plugins, f, indent=4)
+          PY
+          python3 - <<'PY'
+          import json, os
           slug = os.environ["GITHUB_REPOSITORY"]
           repo = {
               "name": "CrunchyMe",

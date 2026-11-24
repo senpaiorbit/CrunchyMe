@@ -39,6 +39,8 @@ git push -u origin main
 ```
 
 The first workflow run creates the `builds` branch and publishes the artifacts.
+Each CI build uses the workflow run number as the plugin version, and the published plugin URL
+includes a build tag. That prevents an update from reusing a stale cached `.cs3` file.
 
 ## First run: add a TMDB key
 
