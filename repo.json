@@ -3,6 +3,6 @@
   "description": "TMDB-first catalog with a pluggable multi-source stream farm",
   "manifestVersion": 1,
   "pluginLists": [
-    "https://raw.githubusercontent.com/YOUR_GITHUB_USER/CrunchyMe/builds/plugins.json"
+    "https://raw.githubusercontent.com/senpaiorbit/CrunchyMe/builds/plugins.json"
   ]
 }

@@ -11,7 +11,7 @@ cloudstream {
     status = 1
     tvTypes = listOf("Movie", "TvSeries")
     requiresResources = false
-    val slug = System.getenv("GITHUB_REPOSITORY") ?: "YOUR_GITHUB_USER/CrunchyMe"
+    val slug = System.getenv("GITHUB_REPOSITORY") ?: "senpaiorbit/CrunchyMe"
     setRepo("https://github.com/$slug")
     iconUrl = "https://raw.githubusercontent.com/$slug/main/CrunchyMe/icon.png"
 }
