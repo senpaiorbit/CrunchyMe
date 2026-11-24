@@ -1,8 +1,8 @@
 [
     {
-        "url": "https://raw.githubusercontent.com/senpaiorbit/CrunchyMe/builds/CrunchyMe.cs3",
+        "url": "https://raw.githubusercontent.com/senpaiorbit/CrunchyMe/builds/CrunchyMe.cs3?v=0e8ee43ca609",
         "status": 1,
-        "version": 1,
+        "version": 7,
         "name": "CrunchyMe",
         "internalName": "CrunchyMe",
         "authors": [
@@ -18,6 +18,6 @@
         ],
         "iconUrl": "https://raw.githubusercontent.com/senpaiorbit/CrunchyMe/main/CrunchyMe/icon.png",
         "apiVersion": 1,
-        "fileHash": "sha256-9659c512b0f8497e6895e16e85fe13ed0e51776bb865083af3bd93304676f5eb"
+        "fileHash": "sha256-d38fba10f97b80b5b5b77e1fc0126c260be0820ec082c67b10881449fccaae39"
     }
 ]
