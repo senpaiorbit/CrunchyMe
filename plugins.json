@@ -1,8 +1,8 @@
 [
     {
-        "url": "https://github.com/senpaiorbit/CrunchyMe/raw/builds/CrunchyMe-db073e7f8e25.cs3",
+        "url": "https://github.com/senpaiorbit/CrunchyMe/raw/builds/CrunchyMe-dabcd51cc0e9.cs3",
         "status": 1,
-        "version": 15,
+        "version": 16,
         "name": "CrunchyMe",
         "internalName": "CrunchyMe",
         "authors": [
@@ -18,6 +18,34 @@
         ],
         "iconUrl": "https://raw.githubusercontent.com/senpaiorbit/CrunchyMe/main/CrunchyMe/icon.png",
         "apiVersion": 1,
-        "fileHash": "sha256-ba8b8817149227981c53005297925050be3f1a5f91c4ae84c64b380bd88e0d65"
+        "fileHash": "sha256-05c61342127aeaddf2dcdeb0d7079b430eaa7b247384e9d59d35b98122308309"
+    },
+    {
+        "url": "https://github.com/senpaiorbit/CrunchyMe/raw/builds/MegaFlix-dabcd51cc0e9.cs3",
+        "status": 1,
+        "version": 16,
+        "name": "MegaFlix",
+        "internalName": "MegaFlix",
+        "authors": [
+            "MegaFlix"
+        ],
+        "description": "One search across every installed CloudStream provider. Groups duplicate titles, labels source counts, and aggregates playable links without bundling other extensions.",
+        "fileSize": 89524,
+        "repositoryUrl": "https://github.com/senpaiorbit/CrunchyMe",
+        "language": "en",
+        "tvTypes": [
+            "Movie",
+            "TvSeries",
+            "Anime",
+            "Cartoon",
+            "OVA",
+            "Live",
+            "Documentary",
+            "AsianDrama",
+            "Others"
+        ],
+        "iconUrl": "https://raw.githubusercontent.com/senpaiorbit/CrunchyMe/main/MegaFlix/icon.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-a386e2899d5d006dcd7878a217fb5665642556cfbfe77a28c634f80ee8e0c1de"
     }
 ]

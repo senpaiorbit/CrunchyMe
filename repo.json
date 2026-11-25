@@ -1,6 +1,6 @@
 {
-  "name": "CrunchyMe",
-  "description": "TMDB-first catalog with a pluggable multi-source stream farm",
+  "name": "CrunchyMe + MegaFlix",
+  "description": "CrunchyMe plus MegaFlix, a runtime aggregator over installed CloudStream providers",
   "manifestVersion": 1,
   "pluginLists": [
     "https://github.com/senpaiorbit/CrunchyMe/raw/builds/plugins.json"
