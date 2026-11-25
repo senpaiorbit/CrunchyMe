@@ -448,6 +448,11 @@ class CrunchyMeProvider : MainAPI() {
                 MediaKind.DASH -> ExtractorLinkType.DASH
                 MediaKind.FILE -> ExtractorLinkType.VIDEO
             }
+            val playableUrl = if (GoogleVideoProxy.isGoogleVideo(candidate.url)) {
+                GoogleVideoProxy.register(candidate.url, headers) ?: candidate.url
+            } else {
+                candidate.url
+            }
             val label = Naming.displayName(
                 serverName = candidate.sourceName,
                 audioLabel = candidate.audioLabel,
@@ -465,7 +470,7 @@ class CrunchyMeProvider : MainAPI() {
                 newExtractorLink(
                     source = sourceLabel,
                     name = label,
-                    url = candidate.url,
+                    url = playableUrl,
                     type = type,
                 ) {
                     referer = candidate.referer ?: ""

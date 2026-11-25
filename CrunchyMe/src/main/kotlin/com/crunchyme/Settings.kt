@@ -2,6 +2,7 @@ package com.crunchyme
 
 import android.content.Context
 import android.content.SharedPreferences
+import java.io.File
 
 object Settings {
 
@@ -37,6 +38,8 @@ object Settings {
     }
 
     fun isReady(): Boolean = appContext != null
+
+    fun cacheDir(): File? = appContext?.cacheDir
 
     private fun prefs(): SharedPreferences? =
         appContext?.getSharedPreferences(PREFS, Context.MODE_PRIVATE)

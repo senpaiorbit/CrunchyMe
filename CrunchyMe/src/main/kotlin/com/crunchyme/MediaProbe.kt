@@ -8,6 +8,7 @@ object MediaProbe {
     private data class Sniff(val kind: MediaKind, val text: String?)
 
     suspend fun enrich(candidate: Candidate, qualityFloor: Int): Candidate? {
+        if (GoogleVideoProxy.isGoogleVideo(candidate.url)) return candidate
         var height = candidate.qualityHint
         var audio = candidate.audioLabel
         var subtitles = candidate.subtitles
