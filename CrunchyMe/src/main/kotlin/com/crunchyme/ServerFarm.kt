@@ -76,7 +76,7 @@ object ServerFarm {
             movieUrl = "https://netnaija.film/",
             tvUrl = "https://netnaija.film/",
             referer = "https://netnaija.film/", kind = ServerKind.JSON, keyType = KeyType.TITLE,
-            timeoutSec = 60, note = "MovieBox alternative", defaultEnabled = false,
+            timeoutSec = 60, note = "MovieBox alternative", defaultEnabled = true,
             speed = ServerSpeed.FAST, supports4k = true, hasSubtitles = true,
         ),
         ServerSpec(
@@ -122,15 +122,23 @@ object ServerFarm {
             movieUrl = "https://4khdhub.one/?s={title}",
             tvUrl = "https://4khdhub.one/?s={title}",
             referer = "https://4khdhub.one/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
-            timeoutSec = 45, note = "4K files", defaultEnabled = false,
+            timeoutSec = 45, note = "4K files", defaultEnabled = true,
             speed = ServerSpeed.SLOW, supports4k = true,
         ),
         ServerSpec(
-            id = "fsl", name = "FSL",
+            id = "fsl", name = "FSLv1",
             movieUrl = "https://vegamovies.latino/?s={title}",
             tvUrl = "https://vegamovies.latino/?s={title}",
             referer = "https://vegamovies.latino/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
-            timeoutSec = 45, note = "File index", defaultEnabled = false,
+            timeoutSec = 60, note = "VegaMovies files", defaultEnabled = true,
+            speed = ServerSpeed.SLOW, supports4k = true,
+        ),
+        ServerSpec(
+            id = "fsl2", name = "FSLv2",
+            movieUrl = "https://rogmovies.beauty/?s={title}",
+            tvUrl = "https://rogmovies.beauty/?s={title}",
+            referer = "https://rogmovies.beauty/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
+            timeoutSec = 60, note = "RogMovies files", defaultEnabled = true,
             speed = ServerSpeed.SLOW, supports4k = true,
         ),
         ServerSpec(
@@ -138,7 +146,7 @@ object ServerFarm {
             movieUrl = "https://hindmovie.one/?s={title}",
             tvUrl = "https://hindmovie.one/?s={title}",
             referer = "https://hindmovie.one/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
-            timeoutSec = 45, note = "File index", defaultEnabled = false,
+            timeoutSec = 60, note = "HindMovie files", defaultEnabled = true,
             speed = ServerSpeed.SLOW,
         ),
         ServerSpec(
@@ -146,23 +154,23 @@ object ServerFarm {
             movieUrl = "https://new8.hdhub4u.cl/search/{title}/",
             tvUrl = "https://new8.hdhub4u.cl/search/{title}/",
             referer = "https://new8.hdhub4u.cl/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
-            timeoutSec = 45, note = "File index", defaultEnabled = false,
+            timeoutSec = 60, note = "HubCloud files", defaultEnabled = true,
             speed = ServerSpeed.SLOW, supports4k = true,
         ),
         ServerSpec(
             id = "moviesdrive", name = "MoviesDrive",
-            movieUrl = "https://new3.moviesdrive.beer/search/{title}/",
-            tvUrl = "https://new3.moviesdrive.beer/search/{title}/",
-            referer = "https://new3.moviesdrive.beer/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
-            timeoutSec = 45, note = "File index", defaultEnabled = false,
-            speed = ServerSpeed.SLOW,
+            movieUrl = "https://new4.moviesdrive.cyou/search/{title}/",
+            tvUrl = "https://new4.moviesdrive.cyou/search/{title}/",
+            referer = "https://new4.moviesdrive.cyou/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
+            timeoutSec = 60, note = "mdrive files", defaultEnabled = true,
+            speed = ServerSpeed.SLOW, supports4k = true,
         ),
         ServerSpec(
             id = "movies4u", name = "Movies4u",
             movieUrl = "https://new8.movies4u.garden/lookup.php?q={title}",
             tvUrl = "https://new8.movies4u.garden/lookup.php?q={title}",
             referer = "https://new8.movies4u.garden/", kind = ServerKind.JSON, keyType = KeyType.TITLE,
-            timeoutSec = 45, note = "File index", defaultEnabled = false,
+            timeoutSec = 60, note = "File index", defaultEnabled = false,
             speed = ServerSpeed.SLOW, supports4k = true,
         ),
         ServerSpec(
@@ -178,7 +186,7 @@ object ServerFarm {
             movieUrl = "https://toonix.bond/watch/{title}",
             tvUrl = "https://toonix.bond/show/{title}/{season}/{episode}",
             referer = "https://toonix.bond/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
-            timeoutSec = 40, note = "Cartoons & movies", defaultEnabled = false,
+            timeoutSec = 40, note = "Cartoons & movies", defaultEnabled = true,
             speed = ServerSpeed.NORMAL, hasSubtitles = true,
         ),
         ServerSpec(
@@ -204,11 +212,17 @@ object ServerFarm {
     fun defaultEnabledIds(): Set<String> =
         all.filter { it.defaultEnabled }.map { it.id }.toSet()
 
+    /** Providers that became enabled by default in settings schema 2. */
+    val enabledInSchema2: Set<String> = setOf(
+        "netnaija", "4khdhub", "fsl", "fsl2", "hindmoviez", "hdhub4u",
+        "moviesdrive", "toonix",
+    )
+
     /** User-visible default order: the reliable stream APIs first, then everything else. */
     fun defaultPriorityOrder(): List<String> {
         val head = listOf(
             "moviebox", "vidrift", "vidlink", "vidbolt", "vidly", "netmirror",
-            "vidy", "bingr", "movy", "atlantic",
+            "vidy", "bingr", "atlantic",
         )
         val rank = mapOf(
             ServerSpeed.VERY_FAST to 0,
@@ -219,7 +233,7 @@ object ServerFarm {
         val rest = all.filterNot { it.id in head }
             .sortedWith(compareBy({ rank[it.speed] ?: 2 }, { it.name.lowercase() }))
             .map { it.id }
-        return (head + rest).distinct()
+        return (head + rest).distinct().filterNot { it == "movy" } + "movy"
     }
 
     fun urlFor(spec: ServerSpec, request: LinkRequest): String? {
@@ -260,7 +274,8 @@ class BuiltinServerSource(private val spec: ServerSpec) : StreamSource {
             "vidrift" -> Vidrift.resolve(spec, request)
             "movy" -> Movy.resolve(spec, request)
             "atlantic" -> Atlantic.resolve(spec, request)
-            "4khdhub", "fsl", "hindmoviez", "hdhub4u", "moviesdrive" -> FileIndex.resolve(spec, request)
+            "fsl", "fsl2" -> Fsl.resolve(spec, request)
+            "4khdhub", "hindmoviez", "hdhub4u", "moviesdrive" -> FileIndex.resolve(spec, request)
             "movies4u" -> Movies4u.resolve(spec, request)
             "animeworld" -> AnimeWorld.resolve(spec, request)
             "toonix", "toonix_anime" -> Toonix.resolve(spec, request)

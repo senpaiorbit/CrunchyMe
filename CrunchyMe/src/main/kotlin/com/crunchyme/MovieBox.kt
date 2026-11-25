@@ -16,7 +16,7 @@ object MovieBox {
 
     private val SEASON_END = Regex("""(?i)\bS(?:eason)?\s*0?(\d{1,2})(?:\s*[-–]\s*S?0?(\d{1,2}))?\b""")
     private val YEAR = Regex("""\b(?:19|20)\d{2}\b""")
-    private val BRACKETS = Regex("""\[([^\]]+)]""")
+    private val BRACKETS = Regex("""[\[(]([^\])]+)[\])]""")
     private val NON_ALNUM = Regex("""[^\p{L}\p{N}]+""")
 
     @Volatile private var token: String? = null
@@ -36,9 +36,16 @@ object MovieBox {
     ): List<Candidate> {
         val title = request.title.trim()
         if (title.isBlank()) return emptyList()
+        if (request.isMovie) {
+            val mobile = MovieBoxMobile.resolve(spec, request)
+            if (mobile.isNotEmpty()) return mobile
+        }
         val bearer = bearer(false, site, source) ?: return emptyList()
         val subjectType = if (request.isMovie) 1 else 2
         var items = search(title, subjectType, bearer, site, source)
+        if (items.length() == 0 && request.year != null) {
+            items = search("$title ${request.year}", subjectType, bearer, site, source)
+        }
         if (items.length() == 0) {
             token = null
             val fresh = bearer(true, site, source) ?: return emptyList()
@@ -56,8 +63,9 @@ object MovieBox {
                 .replace(SEASON_END, "")
                 .replace(BRACKETS, "")
                 .replace(YEAR, "")
+                .replace(Regex("""\s{2,}"""), " ")
             val normalized = normalize(clean)
-            if (normalized != wanted && !(wanted.length >= 4 && normalized.startsWith(wanted))) continue
+            if (!matchesTitle(normalized, wanted)) continue
             val audio = BRACKETS.findAll(rawTitle).map { it.groupValues[1] }
                 .firstOrNull { value -> value.any { it.isLetter() } && value.none { it.isDigit() } }
                 .orEmpty()
@@ -65,7 +73,7 @@ object MovieBox {
                 id = id,
                 detailPath = item.optString("detailPath").trim(),
                 seasonEnd = seasonEnd(rawTitle) ?: 0,
-                language = Naming.displayLabel(audio),
+                language = Naming.displayLabel(audio).ifBlank { Naming.labelOf(request.originalLanguage) },
             )
         }
         if (subjects.isEmpty()) return emptyList()
@@ -90,15 +98,14 @@ object MovieBox {
             val download = requestJson("$BASE/wefeed-h5api-bff/subject/download?$params", playHeaders)
             for (root in listOfNotNull(play, download)) {
                 val data = unwrap(root)
-                val maxResolution = data.optJSONObject("playConfig")?.optInt("maxResolution", 0) ?: 0
-                addStreams(spec, out, data.optJSONArray("streams"), request, subject.language, playHeaders, site, null, maxResolution)
-                addStreams(spec, out, data.optJSONArray("hls"), request, subject.language, playHeaders, site, MediaKind.HLS, 0)
-                addStreams(spec, out, data.optJSONArray("dash"), request, subject.language, playHeaders, site, MediaKind.DASH, 0)
-                addStreams(spec, out, data.optJSONArray("downloads"), request, subject.language, playHeaders, site, null, 0)
+                addStreams(spec, out, data.optJSONArray("streams"), request, subject.language, playHeaders, site, null)
+                addStreams(spec, out, data.optJSONArray("hls"), request, subject.language, playHeaders, site, MediaKind.HLS)
+                addStreams(spec, out, data.optJSONArray("dash"), request, subject.language, playHeaders, site, MediaKind.DASH)
+                addStreams(spec, out, data.optJSONArray("downloads"), request, subject.language, playHeaders, site, null)
             }
             if (out.size >= 12) break
         }
-        return out.values.toList().ifEmpty { MovieBoxMobile.resolve(spec, request) }
+        return out.values.toList()
     }
 
     private data class Subject(val id: String, val detailPath: String, val seasonEnd: Int, val language: String)
@@ -162,6 +169,12 @@ object MovieBox {
         return runCatching { JSONObject(raw) }.getOrNull()
     }
 
+    private fun matchesTitle(candidate: String, wanted: String): Boolean {
+        if (candidate == wanted) return true
+        if (wanted.length < 4 || !candidate.startsWith(wanted)) return false
+        return !candidate[wanted.length].isDigit()
+    }
+
     private fun addStreams(
         spec: ServerSpec,
         out: MutableMap<String, Candidate>,
@@ -171,7 +184,6 @@ object MovieBox {
         headers: Map<String, String>,
         site: String,
         forceKind: MediaKind?,
-        maxResolution: Int,
     ) {
         if (array == null) return
         for (index in 0 until array.length()) {
@@ -184,7 +196,6 @@ object MovieBox {
             if (url.contains("macdn.aoneroom.com/other/", true)) continue
             val resolution = item.optString("resolutions").toIntOrNull()
                 ?: item.optInt("resolution", 0)
-            if (maxResolution > 0 && resolution > maxResolution) continue
             val kind = forceKind ?: when {
                 url.contains(".mpd", true) -> MediaKind.DASH
                 url.contains(".m3u8", true) -> MediaKind.HLS
@@ -330,10 +341,9 @@ private object MovieBoxMobile {
         val matched = subjects.filter { item ->
             val clean = item.optString("title")
                 .replace(Regex("""(?i)\bS(?:eason)?\s*0?\d{1,2}(?:\s*[-–]\s*S?0?\d{1,2})?\b"""), "")
-                .replace(Regex("""\[[^\]]+]"""), "")
+                .replace(Regex("""[\[(][^\])]*[\])]"""), "")
                 .replace(Regex("""\b(?:19|20)\d{2}\b"""), "")
-            val candidate = normalize(clean)
-            candidate == wanted || (wanted.length >= 4 && candidate.startsWith(wanted))
+            matchesTitle(normalize(clean), wanted)
         }.mapNotNull { it.optString("subjectId").takeIf { id -> id.isNotBlank() } }.distinct()
 
         val out = LinkedHashMap<String, Candidate>()
@@ -341,6 +351,8 @@ private object MovieBoxMobile {
             val detail = call("/wefeed-mobile-bff/subject-api/get?subjectId=$id") ?: continue
             val subject = detail.optJSONObject("data") ?: detail
             val language = dubLanguage(subject, id)
+                .ifBlank { languageFromTitle(subject.optString("title")) }
+                .ifBlank { Naming.labelOf(request.originalLanguage) }
             val detectors = subject.optJSONArray("resourceDetectors") ?: continue
             for (index in 0 until detectors.length()) {
                 val rungs = detectors.optJSONObject(index)?.optJSONArray("resolutionList") ?: continue
@@ -447,6 +459,19 @@ private object MovieBoxMobile {
     private fun md5Bytes(bytes: ByteArray): String =
         java.security.MessageDigest.getInstance("MD5").digest(bytes)
             .joinToString("") { "%02x".format(it) }
+
+    private fun matchesTitle(candidate: String, wanted: String): Boolean {
+        if (candidate == wanted) return true
+        if (wanted.length < 4 || !candidate.startsWith(wanted)) return false
+        return !candidate[wanted.length].isDigit()
+    }
+
+    private fun languageFromTitle(title: String): String =
+        Regex("""[\[(]([^\])]*)[\])]""").findAll(title)
+            .map { it.groupValues[1] }
+            .firstOrNull { tag -> tag.any { it.isLetter() } && tag.none { it.isDigit() } }
+            ?.let { Naming.displayLabel(it) }
+            .orEmpty()
 
     private fun dubLanguage(detail: JSONObject, subjectId: String): String {
         val dubs = detail.optJSONArray("dubs") ?: return ""

@@ -25,7 +25,7 @@ class ServerFarmTest {
     @Test
     fun serverIdsAreUnique() {
         val ids = ServerFarm.all.map { it.id }
-        assertEquals(21, ids.size)
+        assertEquals(22, ids.size)
         assertEquals(ids.size, ids.distinct().size)
     }
 
@@ -38,6 +38,11 @@ class ServerFarmTest {
         )
         val moviebox = ServerFarm.spec("moviebox")!!
         assertTrue(ServerFarm.urlFor(moviebox, movie)!!.contains("app_name=moviebox"))
+        val moviesdrive = ServerFarm.spec("moviesdrive")!!
+        assertEquals(
+            "https://new4.moviesdrive.cyou/search/Inception/",
+            ServerFarm.urlFor(moviesdrive, movie),
+        )
     }
 
     @Test
@@ -66,6 +71,7 @@ class ServerFarmTest {
         assertEquals("moviebox", order.first())
         assertTrue(order.indexOf("vidrift") < order.indexOf("4khdhub"))
         assertTrue(order.indexOf("vidrift") < order.indexOf("animeworld"))
+        assertEquals("movy", order.last())
     }
 
     @Test
@@ -74,8 +80,9 @@ class ServerFarmTest {
         listOf(
             "vidy", "vidbolt", "vidly", "vidlink", "moviebox", "netmirror",
             "bingr", "vidrift", "movy", "atlantic", "animeworld", "toonix_anime", "hianime",
+            "4khdhub", "fsl", "fsl2", "hindmoviez", "hdhub4u", "moviesdrive",
+            "netnaija", "toonix",
         ).forEach { assertTrue(it in defaults, "expected $it to be on by default") }
-        listOf("4khdhub", "fsl", "hindmoviez", "hdhub4u", "moviesdrive", "movies4u", "netnaija", "toonix")
-            .forEach { assertFalse(it in defaults) }
+        assertFalse("movies4u" in defaults)
     }
 }

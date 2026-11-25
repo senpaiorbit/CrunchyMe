@@ -104,7 +104,7 @@ The resolver searches `advancedsearch.php`, ranks results by title and year, the
 
 ### Built-in servers
 
-The provider ships with twenty-one optional servers. They run in the configured priority order,
+The provider ships with twenty-two optional servers. They run in the configured priority order,
 up to the parallel-task limit, and each one has its own timeout and circuit breaker. Anime-only
 servers are skipped automatically for non-anime titles.
 
@@ -117,9 +117,15 @@ servers are skipped automatically for non-anime titles.
 | NetMirror | JSON API | on | Reads `streams[]` and `mp4`; uses the `videodownloader.site` referer required by the file CDN. |
 | Atlantic | JSON API | off | Tries the `stream.hls.lol` provider endpoints, then the legacy CDN. Rate-limited on some networks. |
 | MovieBox | JSON API | on | H5 API: bootstrap token, search, play/download. Keeps signed MP4 URLs and the `signHeaderKey`/`signCookie` headers. Falls back to the mobile API. |
-| NetNaija | JSON API | off | MovieBox API with the NetNaija site/source. Use it when MovieBox is region-blocked. |
-| Toonix | Embed | off | Parses the Next.js RSC/flight payload, `legacySrc`, `/api/stream/s/…` and Hydrax sources. Cartoons and movies. |
+| NetNaija | JSON API | on | MovieBox API with the NetNaija site/source. Use it when MovieBox is region-blocked. |
+| Toonix | Embed | on | Parses the Next.js RSC/flight payload, `legacySrc`, `/api/stream/s/…` and Hydrax sources. Cartoons and movies. |
 | Toonix Anime | Embed | on | Same resolver for anime titles; runs only when TMDB/OMDb genres include Animation/Anime. |
+| 4KHDHub | File index | on | Reads the search cards and follows HubCloud/greenmotors links to R2 files. The site's search index is inconsistent. |
+| FSLv1 | File index | on | VegaMovies Typesense search, then `nexdrive`/`fastdl` to a direct Google video URL. |
+| FSLv2 | File index | on | Same FSL resolver pointed at RogMovies; useful when VegaMovies is down. |
+| HindMoviez | File index | on | WordPress search plus HubCloud/greenmotors/links-index resolution. |
+| HDHub4u | File index | on | Search page plus HubCloud, HubDrive, Pixeldrain and greenmotors. |
+| MoviesDrive | File index | on | `mdrive` archives resolved through HubCloud workers. |
 
 Enable or disable any of them in **Settings → Providers**. Use **Priority** to put reliable
 providers such as MovieBox or Vidrift first. If a server is slow or blocked, move it down or turn
