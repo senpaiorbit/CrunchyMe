@@ -36,6 +36,7 @@ object Tmdb {
         val overview: String?,
         val popularity: Double,
         val originalLanguage: String?,
+        val logo: String? = null,
     )
 
     data class Cast(val name: String, val character: String?, val photo: String?)
@@ -56,6 +57,8 @@ object Tmdb {
         val cast: List<Cast>,
         val seasonNumbers: List<Int>,
         val numberOfSeasons: Int,
+        val logo: String? = null,
+        val trailer: String? = null,
     )
 
     data class Ep(
@@ -147,7 +150,7 @@ object Tmdb {
 
     suspend fun detail(id: Int, type: String): Detail? {
         val path = if (type == "movie") "/movie/$id" else "/tv/$id"
-        val json = get(path, mapOf("append_to_response" to "external_ids,credits")) ?: return null
+        val json = get(path, mapOf("append_to_response" to "external_ids,credits,images,videos")) ?: return null
 
         val isMovie = type == "movie"
         val title = if (isMovie) json.optString("title") else json.optString("name")
@@ -190,6 +193,38 @@ object Tmdb {
             }
         }
 
+        val logo = json.optJSONObject("images")
+            ?.optJSONArray("logos")
+            ?.let { logos ->
+                (0 until logos.length()).mapNotNull { index ->
+                    val item = logos.optJSONObject(index) ?: return@mapNotNull null
+                    val path = item.optString("file_path")
+                    if (!path.startsWith("/")) return@mapNotNull null
+                    path to item.optString("iso_639_1").equals("en", true)
+                }.sortedByDescending { it.second }.firstOrNull()?.first
+            }
+            ?.let { image(it) }
+        val trailer = json.optJSONObject("videos")
+            ?.optJSONArray("results")
+            ?.let { videos ->
+                (0 until videos.length()).mapNotNull { index ->
+                    val video = videos.optJSONObject(index) ?: return@mapNotNull null
+                    if (!video.optString("site").equals("YouTube", true)) return@mapNotNull null
+                    val key = video.optString("key").trim()
+                    if (key.isBlank()) return@mapNotNull null
+                    val type = video.optString("type")
+                    Triple(key, type, video.optBoolean("official", false))
+                }.sortedWith(compareByDescending<Triple<String, String, Boolean>> {
+                    when {
+                        it.second.equals("Trailer", true) && it.third -> 3
+                        it.second.equals("Trailer", true) -> 2
+                        it.second.equals("Teaser", true) -> 1
+                        else -> 0
+                    }
+                }).firstOrNull()?.first
+            }
+            ?.let { "https://www.youtube.com/watch?v=$it" }
+
         return Detail(
             id = id,
             type = type,
@@ -206,6 +241,8 @@ object Tmdb {
             cast = cast,
             seasonNumbers = seasonNumbers,
             numberOfSeasons = json.optInt("number_of_seasons", seasonNumbers.size),
+            logo = logo,
+            trailer = trailer,
         )
     }
 
@@ -311,6 +348,7 @@ object Tmdb {
             overview = obj.optString("overview").trim().ifBlank { null },
             popularity = obj.optDouble("popularity", 0.0),
             originalLanguage = obj.optString("original_language").trim().ifBlank { null },
+            logo = null,
         )
     }
 

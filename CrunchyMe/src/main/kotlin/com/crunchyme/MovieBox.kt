@@ -36,11 +36,11 @@ object MovieBox {
     ): List<Candidate> {
         val title = request.title.trim()
         if (title.isBlank()) return emptyList()
+        val out = LinkedHashMap<String, Candidate>()
         if (request.isMovie) {
-            val mobile = MovieBoxMobile.resolve(spec, request)
-            if (mobile.isNotEmpty()) return mobile
+            MovieBoxMobile.resolve(spec, request).forEach { out.putIfAbsent(it.url, it) }
         }
-        val bearer = bearer(false, site, source) ?: return emptyList()
+        val bearer = bearer(false, site, source) ?: return out.values.toList()
         val subjectType = if (request.isMovie) 1 else 2
         var items = search(title, subjectType, bearer, site, source)
         if (items.length() == 0 && request.year != null) {
@@ -48,10 +48,10 @@ object MovieBox {
         }
         if (items.length() == 0) {
             token = null
-            val fresh = bearer(true, site, source) ?: return emptyList()
+            val fresh = bearer(true, site, source) ?: return out.values.toList()
             items = search(title, subjectType, fresh, site, source)
         }
-        if (items.length() == 0) return emptyList()
+        if (items.length() == 0) return out.values.toList()
 
         val wanted = normalize(title)
         val subjects = mutableListOf<Subject>()
@@ -76,9 +76,8 @@ object MovieBox {
                 language = Naming.displayLabel(audio).ifBlank { Naming.labelOf(request.originalLanguage) },
             )
         }
-        if (subjects.isEmpty()) return emptyList()
+        if (subjects.isEmpty()) return out.values.toList()
 
-        val out = LinkedHashMap<String, Candidate>()
         for (subject in subjects.take(6)) {
             if (!request.isMovie && subject.seasonEnd in 1 until request.season) continue
             val detailPath = subject.detailPath.ifBlank { detailPath(subject.id, site, source) }
@@ -194,8 +193,13 @@ object MovieBox {
             val policyUrl = policyResource(signCookie)
             val url = (policyUrl ?: rawUrl).takeIf { it.startsWith("http") } ?: continue
             if (url.contains("macdn.aoneroom.com/other/", true)) continue
-            val resolution = item.optString("resolutions").toIntOrNull()
+            val rawResolution = item.optString("resolutions")
+            val resolution = Naming.qualityHeight(rawResolution)
+                .takeIf { it > 0 }
+                ?: rawResolution.toIntOrNull()?.takeIf { it in 144..4320 }
                 ?: item.optInt("resolution", 0)
+            val inferred = Naming.qualityHeight(url).takeIf { it > 0 } ?: 0
+            val finalResolution = if (resolution > 0) resolution else inferred
             val kind = forceKind ?: when {
                 url.contains(".mpd", true) -> MediaKind.DASH
                 url.contains(".m3u8", true) -> MediaKind.HLS
@@ -221,7 +225,7 @@ object MovieBox {
                     kind = if (policyUrl != null) MediaKind.DASH else kind,
                     referer = site,
                     headers = streamHeaders,
-                    qualityHint = resolution,
+                    qualityHint = finalResolution,
                     audioLabel = language,
                     mediaLabel = request.title,
                 )

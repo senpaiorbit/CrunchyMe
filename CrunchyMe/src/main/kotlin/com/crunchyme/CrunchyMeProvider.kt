@@ -6,6 +6,7 @@ import com.lagradost.cloudstream3.HomePageResponse
 import com.lagradost.cloudstream3.LoadResponse
 import com.lagradost.cloudstream3.LoadResponse.Companion.addImdbId
 import com.lagradost.cloudstream3.LoadResponse.Companion.addScore
+import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
 import com.lagradost.cloudstream3.MainAPI
 import com.lagradost.cloudstream3.MainPageData
 import com.lagradost.cloudstream3.MainPageRequest
@@ -37,6 +38,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withTimeoutOrNull
 
 class CrunchyMeProvider : MainAPI() {
 
@@ -48,8 +50,8 @@ class CrunchyMeProvider : MainAPI() {
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries)
 
     override val mainPage: List<MainPageData> get() = listOf(
-        MainPageData(name = "Trending Movies", data = "trending_movie"),
-        MainPageData(name = "Trending Series", data = "trending_tv"),
+        MainPageData(name = "Trending Movies", data = "trending_movie", horizontalImages = true),
+        MainPageData(name = "Trending Series", data = "trending_tv", horizontalImages = true),
         MainPageData(name = "Popular Movies", data = "popular_movie"),
         MainPageData(name = "Popular Series", data = "popular_tv"),
         MainPageData(name = "Top Rated Movies", data = "top_movie"),
@@ -68,7 +70,22 @@ class CrunchyMeProvider : MainAPI() {
         if (catalog() == CatalogProvider.IMDB) return imdbHome(request)
         if (!Tmdb.hasKey()) return null
         val items = Tmdb.row(request.data, page) ?: return null
-        val cards = items.mapNotNull { it.toCard() }
+        val logos = if (request.horizontalImages) {
+            coroutineScope {
+                items.take(6).map { item ->
+                    async {
+                        withTimeoutOrNull(2_500) {
+                            runCatching { Tmdb.detail(item.id, item.type)?.logo }.getOrNull()
+                        }
+                    }
+                }.awaitAll()
+            }
+        } else {
+            emptyList()
+        }
+        val cards = items.mapIndexedNotNull { index, item ->
+            item.toCard(logos.getOrNull(index))
+        }
         if (cards.isEmpty()) return null
         return newHomePageResponse(request, cards)
     }
@@ -153,10 +170,15 @@ class CrunchyMeProvider : MainAPI() {
                 duration = detail.runtime
                 detail.imdbId?.let { addImdbId(it) }
                 detail.score?.let { addScore(it.toString(), 10) }
+                logoUrl = detail.logo
+                addTrailer(detail.trailer, referer = "https://www.youtube.com/")
             }
         }
 
         val episodes = Tmdb.episodes(id)
+            .filter { it.season > 0 && it.number > 0 }
+            .distinctBy { it.season to it.number }
+            .sortedWith(compareBy({ it.season }, { it.number }))
         if (episodes.isEmpty()) return null
         val episodeList = episodes.map { ep ->
             newEpisode(Refs.episode(id, detail.imdbId, ep.season, ep.number)) {
@@ -181,6 +203,8 @@ class CrunchyMeProvider : MainAPI() {
             duration = detail.runtime
             detail.imdbId?.let { addImdbId(it) }
             detail.score?.let { addScore(it.toString(), 10) }
+            logoUrl = detail.logo
+            addTrailer(detail.trailer, referer = "https://www.youtube.com/")
         }
     }
 
@@ -202,6 +226,9 @@ class CrunchyMeProvider : MainAPI() {
         }
 
         val episodes = Omdb.episodes(detail.imdbId)
+            .filter { it.season > 0 && it.number > 0 }
+            .distinctBy { it.season to it.number }
+            .sortedWith(compareBy({ it.season }, { it.number }))
         if (episodes.isEmpty()) return null
         val episodeList = episodes.map { ep ->
             newEpisode(Refs.imdb(detail.imdbId, "tv", ep.season, ep.number)) {
@@ -393,18 +420,18 @@ class CrunchyMeProvider : MainAPI() {
         }
     }
 
-    private fun Tmdb.Item.toCard(): SearchResponse? {
+    private fun Tmdb.Item.toCard(logo: String? = null): SearchResponse? {
         if (title.isBlank()) return null
         val url = if (type == "movie") Refs.movie(id) else Refs.tv(id)
         return if (type == "movie") {
             newMovieSearchResponse(title, url, TvType.Movie) {
-                posterUrl = this@toCard.poster
+                posterUrl = logo ?: this@toCard.poster
                 year = this@toCard.year
                 score = this@toCard.score?.let { Score.from10(it) }
             }
         } else {
             newTvSeriesSearchResponse(title, url, TvType.TvSeries) {
-                posterUrl = this@toCard.poster
+                posterUrl = logo ?: this@toCard.poster
                 year = this@toCard.year
                 score = this@toCard.score?.let { Score.from10(it) }
             }

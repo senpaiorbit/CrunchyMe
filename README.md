@@ -62,7 +62,7 @@ bundled into the plugin and never sent anywhere except `api.themoviedb.org`.
 | Catalog provider | **TMDB** (default) or **IMDb**. IMDb uses OMDb and works without a TMDB key. |
 | TMDB API key | Enables the TMDB catalog, search, details and episodes. |
 | Minimum quality | Drops streams whose height is *known* to be below the floor (480p / 720p / 1080p / Any). Unknown heights are kept. |
-| Provider priority | Move providers up or down. Top providers start first; the rest continue in the background. |
+| Provider priority | Drag a provider by its handle or type a score from 1 to 100 (100 starts first). Changing priority alone does not clear cached links or reload the screen. |
 | Parallel tasks | How many providers resolve at once (2–16). Higher is faster; lower is gentler on slow devices. |
 | Internet Archive | Built-in legal source for public-domain films. |
 | Built-in servers | Turn individual providers on or off (VidBolt, Vidrift, Vidly, Bingr, NetMirror, MovieBox, NetNaija, Toonix, …). |
@@ -88,7 +88,8 @@ bundled into the plugin and never sent anywhere except `api.themoviedb.org`.
    - MP4/MKV: issues a `Range` request and parses the `moov → trak → tkhd` box for the real height.
 6. Candidates below the quality floor (when the height is known) are dropped. If every
    candidate from a source is below the floor, its best low-quality candidate is kept instead of
-   returning nothing. Links are deduplicated, emitted progressively, cached for 2 minutes, and
+   returning nothing. File-index HTML pages and Cloudflare challenges are rejected here, which
+   prevents CloudStream's "video is unsupported" error from a download page being played as video. Links are deduplicated, emitted progressively, cached for 2 minutes, and
    sent with the right `Referer`/headers and subtitle tracks.
 
 ## Sources
@@ -104,7 +105,7 @@ The resolver searches `advancedsearch.php`, ranks results by title and year, the
 
 ### Built-in servers
 
-The provider ships with twenty-two optional servers. They run in the configured priority order,
+The provider ships with twenty-six optional servers. They run in the configured priority order,
 up to the parallel-task limit, and each one has its own timeout and circuit breaker. Anime-only
 servers are skipped automatically for non-anime titles.
 
@@ -126,14 +127,19 @@ servers are skipped automatically for non-anime titles.
 | HindMoviez | File index | on | WordPress search plus HubCloud/greenmotors/links-index resolution. |
 | HDHub4u | File index | on | Search page plus HubCloud, HubDrive, Pixeldrain and greenmotors. |
 | MoviesDrive | File index | on | `mdrive` archives resolved through HubCloud workers. |
+| MoviesMod | File index | on | WordPress search plus `?url=` wrapped download pages and `driveseed`/`gdflix` mirrors. |
+| Bollyflix | File index | on | Bollywood and web-series search; follows `fastdlserver` → `gdflix`/`gdlink`, `driveseed`, `filepress` and `nexdrive` links. |
+| MultiMovies | Embed | on | MultiMovies search; resolves Vidrift, VidBolt and VidOut directly and scans the remaining embeds for media. |
+| VidOut | Embed | on | Reads the Watchout2025 GitHub HLS index directly: `/hls/movie/<tmdb>` for movies and `/hls/tv/<tmdb>/S<season>.json` for episodes. |
 
-Enable or disable any of them in **Settings → Providers**. Use **Priority** to put reliable
-providers such as MovieBox or Vidrift first. If a server is slow or blocked, move it down or turn
-it off; the remaining sources still run. The health breaker also disables a repeatedly failing
+Enable or disable any of them in **Settings → Providers**. Each row has an on/off switch, a drag
+handle and a 1–100 priority score. 100 runs first. If a server is slow or blocked, lower its score
+or turn it off; the remaining sources still run. The health breaker also disables a repeatedly failing
 server for five minutes, and **Maintenance → Reset source health** clears that state.
 
 These resolvers do not bypass DRM, logins, or bot challenges. A Cloudflare interstitial is detected
-and skipped rather than treated as an empty result.
+and skipped rather than treated as an empty result. File-index sites sometimes publish only ZIP
+archives; those are skipped because the player cannot open an archive as a video.
 
 ### Stremio / Nuvio addons (user supplied)
 
@@ -178,12 +184,17 @@ instead of being parsed as empty results.
 
 1. Add a `ServerSpec` to `ServerFarm.all` in `ServerFarm.kt` with the movie and TV URL templates.
    Set `kind = ServerKind.JSON` for an API endpoint or `ServerKind.EMBED` for a page.
+   Use `{base}` plus a `domainKey` when the site changes domains often.
 2. Add a resolver branch in `BuiltinServerSource.resolve` if the provider needs custom parsing.
    Otherwise the generic `JsonResolver` / `EmbedPage` handles it.
 3. Add a parser test with a recorded fixture. Keep network code out of the parser so it stays
    JVM-testable.
 4. Add the provider to the README table. The settings UI reads `ServerFarm.all`, so no UI edit is
    needed; new providers default to on unless `defaultEnabled = false`.
+
+Domain overrides live in `ProviderDomains.kt`. The resolver reads a small JSON endpoint, follows
+the provider landing page or `?re=` link, and falls back to the last known good host. If a site
+moves, update the fallback there instead of editing every `ServerSpec`.
 
 The important rule: sources return `Candidate`s, never CloudStream types. That keeps them
 unit-testable on the JVM and keeps the CloudStream API confined to `CrunchyMeProvider`,

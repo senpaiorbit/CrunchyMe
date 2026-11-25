@@ -40,7 +40,7 @@ object Fsl {
                         !ProviderSupport.episodeMatches(label, request.season, request.episode)
                     ) continue
                     for (gateway in gateways.take(2)) {
-                        for (url in expand(gateway, hit.url, spec)) {
+                        for (url in expand(gateway, hit.url, spec, request)) {
                             val key = url.substringBefore("?").ifBlank { url }
                             if (out.containsKey(key)) continue
                             out[key] = ProviderSupport.candidate(
@@ -109,7 +109,12 @@ object Fsl {
         return groups
     }
 
-    private suspend fun expand(gateway: String, referer: String, spec: ServerSpec): List<String> {
+    private suspend fun expand(
+        gateway: String,
+        referer: String,
+        spec: ServerSpec,
+        request: LinkRequest,
+    ): List<String> {
         if (FASTDL.containsMatchIn(gateway)) return fastdl(gateway)
         if (gateway.contains("vcloud.", true)) return vcloud(gateway)
         val page = Http.text(gateway, ProviderSupport.headers(referer), 15) ?: return emptyList()
@@ -119,9 +124,8 @@ object Fsl {
         val out = fast.flatMap { fastdl(it) }.toMutableList()
         val cloud = VCLOUD.findAll(page).map { it.value }.distinct().take(3)
         for (url in cloud) out += vcloud(url)
-        if (out.isEmpty() && (gateway.contains("hubcloud", true) || gateway.contains("pixeldrain", true))) {
-            out += FileIndex.resolveLink(spec, gateway, referer, LinkRequest(0, null, "movie", 0, 0, "", null, null), "", 1)
-                .map { it.url }
+        if (out.isEmpty() && GATEWAY.containsMatchIn(gateway)) {
+            out += FileIndex.resolveLink(spec, gateway, referer, request, "", 1).map { it.url }
         }
         return out.distinct()
     }

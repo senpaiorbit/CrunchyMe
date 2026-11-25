@@ -5,40 +5,99 @@ import kotlin.math.min
 /** Turns a raw candidate into a player-ready one: real height, audio label, subtitles. */
 object MediaProbe {
 
+    private data class Sniff(val kind: MediaKind, val text: String?)
+
     suspend fun enrich(candidate: Candidate, qualityFloor: Int): Candidate? {
         var height = candidate.qualityHint
         var audio = candidate.audioLabel
         var subtitles = candidate.subtitles
         var inline = candidate.inlineManifest
         val headers = Http.withReferer(candidate.headers, candidate.referer)
+        val sniff = sniff(candidate, headers) ?: return null
+        var working = candidate.copy(kind = sniff.kind)
+        inline = inline ?: sniff.text
 
-        when (candidate.kind) {
+        when (working.kind) {
             MediaKind.HLS, MediaKind.DASH -> {
-                val text = inline ?: Http.text(candidate.url, headers, 8)
-                if (!text.isNullOrBlank()) {
-                    val info = Manifest.analyze(text, candidate.url, candidate.kind)
-                    if (info.height > height) height = info.height
-                    if (info.audio.isNotEmpty()) {
-                        val label = Naming.displayLabel(info.audio.joinToString(", "))
-                        if (label.isNotBlank()) audio = label
-                    }
-                    if (subtitles.isEmpty()) subtitles = info.subtitles
-                    inline = text
+                val text = inline ?: Http.text(working.url, headers, 8)
+                if (text.isNullOrBlank()) return null
+                if (working.kind == MediaKind.HLS && !text.contains("#EXTM3U", true)) return null
+                if (working.kind == MediaKind.DASH && !text.contains("<MPD", true)) return null
+                val info = Manifest.analyze(text, working.url, working.kind)
+                if (info.height > height) height = info.height
+                if (info.audio.isNotEmpty()) {
+                    val label = Naming.displayLabel(info.audio.joinToString(", "))
+                    if (label.isNotBlank()) audio = label
                 }
+                if (subtitles.isEmpty()) subtitles = info.subtitles
+                inline = text
             }
 
             MediaKind.FILE -> {
-                if (height <= 0) height = Mp4Height.probe(candidate.url, headers)
+                if (height <= 0) height = Mp4Height.probe(working.url, headers)
             }
         }
 
         if (qualityFloor > 0 && height in 1 until qualityFloor) return null
-        return candidate.copy(
+        return working.copy(
             qualityHint = height,
             audioLabel = audio,
             subtitles = subtitles,
             inlineManifest = inline,
         )
+    }
+
+    /**
+     * CloudStream reports "video is unsupported" when a file-index page is
+     * handed to the player as a video. Confirm the response really is media and
+     * correct the kind when the host serves HLS without a .m3u8 suffix.
+     */
+    private suspend fun sniff(candidate: Candidate, headers: Map<String, String>): Sniff? {
+        val inline = candidate.inlineManifest
+        if (inline != null) {
+            val kind = when {
+                inline.contains("#EXTM3U", true) -> MediaKind.HLS
+                inline.contains("<MPD", true) -> MediaKind.DASH
+                else -> candidate.kind
+            }
+            return Sniff(kind, inline)
+        }
+        val range = if (candidate.kind == MediaKind.FILE) "bytes=0-65535" else null
+        val result = Http.request(candidate.url, headers, 8, range) ?: return null
+        if (result.code !in 200..399 && result.code != 206) return null
+        val contentType = result.headers.entries
+            .firstOrNull { it.key.equals("Content-Type", true) }?.value.orEmpty().lowercase()
+        val body = result.body
+        val lower = body.trimStart().lowercase()
+        if (contentType.contains("text/html") || lower.startsWith("<!doctype") ||
+            lower.startsWith("<html") || lower.contains("cf-chl") ||
+            lower.contains("just a moment")
+        ) return null
+
+        val bytes = result.bytes
+        val kind = when {
+            body.contains("#EXTM3U", true) || contentType.contains("mpegurl") -> MediaKind.HLS
+            body.contains("<MPD", true) || contentType.contains("dash+xml") -> MediaKind.DASH
+            contentType.startsWith("video/") || contentType.contains("octet-stream") ||
+                looksLikeVideo(bytes) -> MediaKind.FILE
+            else -> candidate.kind
+        }
+        if (kind == MediaKind.FILE && !looksLikeVideo(bytes) &&
+            !contentType.startsWith("video/") &&
+            !candidate.url.contains(".mp4", true) && !candidate.url.contains(".mkv", true) &&
+            !candidate.url.contains(".webm", true)
+        ) return null
+        return Sniff(kind, if (kind == MediaKind.HLS || kind == MediaKind.DASH) body else null)
+    }
+
+    private fun looksLikeVideo(bytes: ByteArray): Boolean {
+        if (bytes.size < 12) return false
+        val head = String(bytes, 0, minOf(12, bytes.size), Charsets.ISO_8859_1)
+        if (head.length >= 8 && (head.substring(4, 8) == "ftyp" || head.substring(4, 8) == "moov" ||
+                head.substring(4, 8) == "mdat" || head.substring(4, 8) == "wide")) return true
+        if (bytes[0] == 0x1A.toByte() && bytes[1] == 0x45.toByte() &&
+            bytes[2] == 0xDF.toByte() && bytes[3] == 0xA3.toByte()) return true
+        return head.startsWith("RIFF") || head.startsWith("OggS")
     }
 }
 

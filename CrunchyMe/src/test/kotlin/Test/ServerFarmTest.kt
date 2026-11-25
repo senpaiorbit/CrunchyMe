@@ -25,7 +25,7 @@ class ServerFarmTest {
     @Test
     fun serverIdsAreUnique() {
         val ids = ServerFarm.all.map { it.id }
-        assertEquals(22, ids.size)
+        assertEquals(26, ids.size)
         assertEquals(ids.size, ids.distinct().size)
     }
 
@@ -33,7 +33,7 @@ class ServerFarmTest {
     fun titleKeyedProvidersUseTheTitle() {
         val hdhub = ServerFarm.spec("hdhub4u")!!
         assertEquals(
-            "https://new8.hdhub4u.cl/search/Inception/",
+            "https://new16.hdhub4u.cl/search/Inception/",
             ServerFarm.urlFor(hdhub, movie),
         )
         val moviebox = ServerFarm.spec("moviebox")!!
@@ -81,7 +81,7 @@ class ServerFarmTest {
             "vidy", "vidbolt", "vidly", "vidlink", "moviebox", "netmirror",
             "bingr", "vidrift", "movy", "atlantic", "animeworld", "toonix_anime", "hianime",
             "4khdhub", "fsl", "fsl2", "hindmoviez", "hdhub4u", "moviesdrive",
-            "netnaija", "toonix",
+            "netnaija", "toonix", "bollyflix", "multimovies", "moviesmod", "vidout",
         ).forEach { assertTrue(it in defaults, "expected $it to be on by default") }
         assertFalse("movies4u" in defaults)
     }

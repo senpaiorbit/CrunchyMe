@@ -198,7 +198,20 @@ object Settings {
             KEY_PRIORITY,
             order.filter { it in known }.distinct().joinToString(","),
         )?.apply()
-        LinkCache.clear()
+    }
+
+    /** Apply a draft from the providers screen in one write. Order-only edits keep the link cache. */
+    fun saveServerState(enabled: Set<String>, order: List<String>) {
+        val oldEnabled = serverEnabledIds()
+        val oldOrder = serverPriority()
+        if (oldEnabled == enabled && oldOrder == order) return
+        val known = ServerFarm.all.map { it.id }
+        prefs()?.edit()
+            ?.putStringSet(KEY_SERVERS, HashSet(enabled.filter { it in known }))
+            ?.putString(KEY_PRIORITY, order.filter { it in known }.distinct().joinToString(","))
+            ?.putInt(KEY_SERVER_SCHEMA, SERVER_SCHEMA)
+            ?.apply()
+        if (oldEnabled != enabled) LinkCache.clear()
     }
 
     fun moveServer(id: String, delta: Int) {

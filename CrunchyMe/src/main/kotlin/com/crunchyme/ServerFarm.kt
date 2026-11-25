@@ -26,6 +26,7 @@ data class ServerSpec(
     val speed: ServerSpeed = ServerSpeed.NORMAL,
     val supports4k: Boolean = false,
     val hasSubtitles: Boolean = false,
+    val domainKey: String? = null,
 ) {
     val supportsTv: Boolean get() = tvUrl.isNotBlank()
 }
@@ -119,51 +120,83 @@ object ServerFarm {
         ),
         ServerSpec(
             id = "4khdhub", name = "4KHDHub",
-            movieUrl = "https://4khdhub.one/?s={title}",
-            tvUrl = "https://4khdhub.one/?s={title}",
-            referer = "https://4khdhub.one/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
+            movieUrl = "{base}/?s={title}",
+            tvUrl = "{base}/?s={title}",
+            referer = "{base}/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
             timeoutSec = 45, note = "4K files", defaultEnabled = true,
-            speed = ServerSpeed.SLOW, supports4k = true,
+            speed = ServerSpeed.SLOW, supports4k = true, domainKey = "4khdhub",
         ),
         ServerSpec(
             id = "fsl", name = "FSLv1",
-            movieUrl = "https://vegamovies.latino/?s={title}",
-            tvUrl = "https://vegamovies.latino/?s={title}",
-            referer = "https://vegamovies.latino/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
+            movieUrl = "{base}/?s={title}",
+            tvUrl = "{base}/?s={title}",
+            referer = "{base}/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
             timeoutSec = 60, note = "VegaMovies files", defaultEnabled = true,
-            speed = ServerSpeed.SLOW, supports4k = true,
+            speed = ServerSpeed.SLOW, supports4k = true, domainKey = "vegamovies",
         ),
         ServerSpec(
             id = "fsl2", name = "FSLv2",
-            movieUrl = "https://rogmovies.beauty/?s={title}",
-            tvUrl = "https://rogmovies.beauty/?s={title}",
-            referer = "https://rogmovies.beauty/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
+            movieUrl = "{base}/?s={title}",
+            tvUrl = "{base}/?s={title}",
+            referer = "{base}/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
             timeoutSec = 60, note = "RogMovies files", defaultEnabled = true,
-            speed = ServerSpeed.SLOW, supports4k = true,
+            speed = ServerSpeed.SLOW, supports4k = true, domainKey = "rogmovies",
         ),
         ServerSpec(
             id = "hindmoviez", name = "HindMoviez",
-            movieUrl = "https://hindmovie.one/?s={title}",
-            tvUrl = "https://hindmovie.one/?s={title}",
-            referer = "https://hindmovie.one/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
+            movieUrl = "{base}/?s={title}",
+            tvUrl = "{base}/?s={title}",
+            referer = "{base}/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
             timeoutSec = 60, note = "HindMovie files", defaultEnabled = true,
-            speed = ServerSpeed.SLOW,
+            speed = ServerSpeed.SLOW, domainKey = "hindmoviez",
         ),
         ServerSpec(
             id = "hdhub4u", name = "HDHub4u",
-            movieUrl = "https://new8.hdhub4u.cl/search/{title}/",
-            tvUrl = "https://new8.hdhub4u.cl/search/{title}/",
-            referer = "https://new8.hdhub4u.cl/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
+            movieUrl = "{base}/search/{title}/",
+            tvUrl = "{base}/search/{title}/",
+            referer = "{base}/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
             timeoutSec = 60, note = "HubCloud files", defaultEnabled = true,
-            speed = ServerSpeed.SLOW, supports4k = true,
+            speed = ServerSpeed.SLOW, supports4k = true, domainKey = "hdhub4u",
         ),
         ServerSpec(
             id = "moviesdrive", name = "MoviesDrive",
-            movieUrl = "https://new4.moviesdrive.cyou/search/{title}/",
-            tvUrl = "https://new4.moviesdrive.cyou/search/{title}/",
-            referer = "https://new4.moviesdrive.cyou/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
+            movieUrl = "{base}/search/{title}/",
+            tvUrl = "{base}/search/{title}/",
+            referer = "{base}/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
             timeoutSec = 60, note = "mdrive files", defaultEnabled = true,
-            speed = ServerSpeed.SLOW, supports4k = true,
+            speed = ServerSpeed.SLOW, supports4k = true, domainKey = "moviesdrive",
+        ),
+        ServerSpec(
+            id = "bollyflix", name = "Bollyflix",
+            movieUrl = "{base}/search/{title}/page/1/",
+            tvUrl = "{base}/search/{title}/page/1/",
+            referer = "{base}/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
+            timeoutSec = 60, note = "Bollywood & web series", defaultEnabled = true,
+            speed = ServerSpeed.SLOW, supports4k = true, domainKey = "bollyflix",
+        ),
+        ServerSpec(
+            id = "multimovies", name = "MultiMovies",
+            movieUrl = "{base}/search?q={title}",
+            tvUrl = "{base}/search?q={title}",
+            referer = "{base}/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
+            timeoutSec = 60, note = "Multi-source embeds", defaultEnabled = true,
+            speed = ServerSpeed.SLOW, supports4k = true, domainKey = "multimovies",
+        ),
+        ServerSpec(
+            id = "vidout", name = "VidOut",
+            movieUrl = "https://vidout.pages.dev/movie/{id}",
+            tvUrl = "https://vidout.pages.dev/tv/{id}/{season}/{episode}",
+            referer = "https://vidout.pages.dev/", kind = ServerKind.EMBED, keyType = KeyType.TMDB,
+            timeoutSec = 30, note = "GitHub HLS index", defaultEnabled = true,
+            speed = ServerSpeed.FAST,
+        ),
+        ServerSpec(
+            id = "moviesmod", name = "MoviesMod",
+            movieUrl = "{base}/search/{title}/page/1/",
+            tvUrl = "{base}/search/{title}/page/1/",
+            referer = "{base}/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
+            timeoutSec = 60, note = "Driveseed files", defaultEnabled = true,
+            speed = ServerSpeed.SLOW, supports4k = true, domainKey = "moviesmod",
         ),
         ServerSpec(
             id = "movies4u", name = "Movies4u",
@@ -215,7 +248,7 @@ object ServerFarm {
     /** Providers that became enabled by default in settings schema 2. */
     val enabledInSchema2: Set<String> = setOf(
         "netnaija", "4khdhub", "fsl", "fsl2", "hindmoviez", "hdhub4u",
-        "moviesdrive", "toonix",
+        "moviesdrive", "toonix", "bollyflix", "multimovies", "moviesmod", "vidout",
     )
 
     /** User-visible default order: the reliable stream APIs first, then everything else. */
@@ -244,6 +277,7 @@ object ServerFarm {
             KeyType.TITLE -> request.title.takeIf { it.isNotBlank() }
         } ?: return null
         val url = template
+            .replace("{base}", ProviderDomains.fallback(spec.domainKey))
             .replace("{id}", URLEncoder.encode(key, "UTF-8"))
             .replace("{imdb}", request.imdbId.orEmpty())
             .replace("{season}", request.season.toString())
@@ -262,28 +296,33 @@ class BuiltinServerSource(private val spec: ServerSpec) : StreamSource {
 
     override suspend fun resolve(request: LinkRequest): List<Candidate> {
         val started = System.currentTimeMillis()
-        val items = when (spec.id) {
-            "vidy" -> Vidy.resolve(spec, request)
-            "vidbolt" -> VidBolt.resolve(spec, request)
-            "vidly" -> Vidly.resolve(spec, request)
-            "vidlink" -> VidLink.resolve(spec, request)
-            "moviebox" -> MovieBox.resolve(spec, request)
-            "netnaija" -> MovieBox.resolveNetNaija(spec, request)
-            "netmirror" -> NetMirror.resolve(spec, request)
-            "bingr" -> Bingr.resolve(spec, request)
-            "vidrift" -> Vidrift.resolve(spec, request)
-            "movy" -> Movy.resolve(spec, request)
-            "atlantic" -> Atlantic.resolve(spec, request)
-            "fsl", "fsl2" -> Fsl.resolve(spec, request)
-            "4khdhub", "hindmoviez", "hdhub4u", "moviesdrive" -> FileIndex.resolve(spec, request)
-            "movies4u" -> Movies4u.resolve(spec, request)
-            "animeworld" -> AnimeWorld.resolve(spec, request)
-            "toonix", "toonix_anime" -> Toonix.resolve(spec, request)
-            "hianime" -> HiAnime.resolve(spec, request)
-            else -> if (spec.kind == ServerKind.JSON) {
-                JsonResolver.resolve(spec, request)
+        val target = ProviderDomains.apply(spec)
+        val items = when (target.id) {
+            "vidy" -> Vidy.resolve(target, request)
+            "vidbolt" -> VidBolt.resolve(target, request)
+            "vidly" -> Vidly.resolve(target, request)
+            "vidlink" -> VidLink.resolve(target, request)
+            "moviebox" -> MovieBox.resolve(target, request)
+            "netnaija" -> MovieBox.resolveNetNaija(target, request)
+            "netmirror" -> NetMirror.resolve(target, request)
+            "bingr" -> Bingr.resolve(target, request)
+            "vidrift" -> Vidrift.resolve(target, request)
+            "movy" -> Movy.resolve(target, request)
+            "atlantic" -> Atlantic.resolve(target, request)
+            "fsl", "fsl2" -> Fsl.resolve(target, request)
+            "4khdhub", "hindmoviez", "hdhub4u", "moviesdrive", "moviesmod" ->
+                FileIndex.resolve(target, request)
+            "bollyflix" -> FileIndex.resolve(target, request)
+            "multimovies" -> MultiMovies.resolve(target, request)
+            "vidout" -> VidOut.resolve(target, request)
+            "movies4u" -> Movies4u.resolve(target, request)
+            "animeworld" -> AnimeWorld.resolve(target, request)
+            "toonix", "toonix_anime" -> Toonix.resolve(target, request)
+            "hianime" -> HiAnime.resolve(target, request)
+            else -> if (target.kind == ServerKind.JSON) {
+                JsonResolver.resolve(target, request)
             } else {
-                EmbedPage.resolve(spec, request)
+                EmbedPage.resolve(target, request)
             }
         }
         val elapsed = System.currentTimeMillis() - started
@@ -342,7 +381,7 @@ private object JsonResolver {
     }
 }
 
-private object VidBolt {
+internal object VidBolt {
     private val FALLBACK_SERVERS = listOf("orion", "callisto", "vega", "quantum", "quasar")
 
     suspend fun resolve(spec: ServerSpec, request: LinkRequest): List<Candidate> {
@@ -415,7 +454,7 @@ private object VidBolt {
     }
 }
 
-private object Vidrift {
+internal object Vidrift {
     private const val ORIGIN = "https://embed.vidrift.net"
     private val PROVIDERS = listOf("titan", "atlas", "lyra", "orion")
 
@@ -561,6 +600,46 @@ private object Vidrift {
     }
 
     private fun encode(value: String): String = URLEncoder.encode(value, "UTF-8")
+}
+
+internal object VidOut {
+    private const val RAW = "https://raw.githubusercontent.com/Watchout2025/api/refs/heads/main/hls"
+
+    suspend fun resolve(spec: ServerSpec, request: LinkRequest): List<Candidate> {
+        if (request.tmdbId <= 0) return emptyList()
+        val headers = mapOf("User-Agent" to Http.UA, "Accept" to "text/plain,application/json,*/*")
+        if (request.isMovie) {
+            val body = Http.text("$RAW/movie/${request.tmdbId}", headers, 12) ?: return emptyList()
+            return listOfNotNull(candidate(body.trim(), "VidOut", request))
+        }
+        val body = Http.text("$RAW/tv/${request.tmdbId}/S${request.season}.json", headers, 12)
+            ?: return emptyList()
+        val root = runCatching { JSONObject(body) }.getOrNull() ?: return emptyList()
+        val raw = root.optString(request.episode.toString()).trim()
+        return listOfNotNull(candidate(raw, "VidOut S${request.season}E${request.episode}", request))
+    }
+
+    private fun candidate(raw: String, label: String, request: LinkRequest): Candidate? {
+        if (raw.isBlank() || !raw.startsWith("http", true)) return null
+        val kind = when {
+            raw.contains(".m3u8", true) -> MediaKind.HLS
+            raw.contains(".mpd", true) -> MediaKind.DASH
+            raw.contains(".txt", true) &&
+                (raw.contains("/hls", true) || raw.contains("/play", true)) -> MediaKind.HLS
+            raw.contains(".mp4", true) || raw.contains(".mkv", true) -> MediaKind.FILE
+            else -> return null
+        }
+        return Candidate(
+            sourceId = "vidout",
+            sourceName = "VidOut",
+            url = raw,
+            kind = kind,
+            referer = "https://vidout.pages.dev/",
+            headers = mapOf("Referer" to "https://vidout.pages.dev/", "User-Agent" to Http.UA),
+            audioLabel = Naming.labelOf(request.originalLanguage),
+            mediaLabel = label,
+        )
+    }
 }
 
 private object Vidly {
