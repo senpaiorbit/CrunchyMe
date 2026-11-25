@@ -22,6 +22,8 @@ object Settings {
     private const val KEY_SERVERS = "servers"
     private const val KEY_PRIORITY = "server_priority"
     private const val KEY_PARALLEL = "parallel_tasks"
+    private const val KEY_SERVER_SCHEMA = "server_schema"
+    private const val SERVER_SCHEMA = 2
 
     @Volatile
     private var appContext: Context? = null
@@ -144,7 +146,15 @@ object Settings {
     fun serverEnabledIds(): Set<String> {
         val store = prefs() ?: return ServerFarm.defaultEnabledIds()
         if (!store.contains(KEY_SERVERS)) return ServerFarm.defaultEnabledIds()
-        return store.getStringSet(KEY_SERVERS, emptySet()).orEmpty().toSet()
+        val saved = store.getStringSet(KEY_SERVERS, emptySet()).orEmpty().toMutableSet()
+        if (store.getInt(KEY_SERVER_SCHEMA, 1) < SERVER_SCHEMA) {
+            saved += ServerFarm.enabledInSchema2
+            store.edit()
+                .putStringSet(KEY_SERVERS, HashSet(saved))
+                .putInt(KEY_SERVER_SCHEMA, SERVER_SCHEMA)
+                .apply()
+        }
+        return saved
     }
 
     fun serverEnabled(id: String): Boolean = serverEnabledIds().contains(id)
@@ -152,13 +162,19 @@ object Settings {
     fun saveServerEnabled(id: String, enabled: Boolean) {
         val next = serverEnabledIds().toMutableSet()
         if (enabled) next += id else next -= id
-        prefs()?.edit()?.putStringSet(KEY_SERVERS, HashSet(next))?.apply()
+        prefs()?.edit()
+            ?.putStringSet(KEY_SERVERS, HashSet(next))
+            ?.putInt(KEY_SERVER_SCHEMA, SERVER_SCHEMA)
+            ?.apply()
         LinkCache.clear()
     }
 
     fun saveAllServers(enabled: Boolean) {
         val next = if (enabled) ServerFarm.all.map { it.id }.toSet() else emptySet<String>()
-        prefs()?.edit()?.putStringSet(KEY_SERVERS, HashSet(next))?.apply()
+        prefs()?.edit()
+            ?.putStringSet(KEY_SERVERS, HashSet(next))
+            ?.putInt(KEY_SERVER_SCHEMA, SERVER_SCHEMA)
+            ?.apply()
         LinkCache.clear()
     }
 
@@ -172,7 +188,8 @@ object Settings {
             .filter { it in known }
             .distinct()
         val base = if (saved.isEmpty()) ServerFarm.defaultPriorityOrder() else saved
-        return (base + ServerFarm.defaultPriorityOrder() + known).distinct()
+        return ((base + ServerFarm.defaultPriorityOrder() + known).distinct().filterNot { it == "movy" } + "movy")
+            .distinct()
     }
 
     fun saveServerPriority(order: List<String>) {

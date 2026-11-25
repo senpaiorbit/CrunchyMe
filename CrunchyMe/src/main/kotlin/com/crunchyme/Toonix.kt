@@ -104,13 +104,23 @@ object Toonix {
                     val src = server.optString("src").trim()
                     if (src.contains("/api/hydrax/")) {
                         resolveHydrax(src).forEach { (url, label) ->
-                            add(url, MediaKind.FILE, key.ifBlank { label }, label.removeSuffix("p").toIntOrNull() ?: 0)
+                            val playable = if (url.contains("&filename=")) url else "$url&filename=video.mp4"
+                            add(
+                                playable,
+                                MediaKind.FILE,
+                                if (key == "ad-hx") "Server 2" else key,
+                                label.removeSuffix("p").toIntOrNull() ?: 0,
+                            )
                         }
                         continue
                     }
                     if (src.startsWith("/") || src.startsWith("http")) {
                         val url = if (src.startsWith("http")) src else BASE + src
-                        add(url, if (src.contains("/api/stream/")) MediaKind.HLS else ProviderSupport.kind(url), key)
+                        add(
+                            url,
+                            if (src.contains("/api/stream/")) MediaKind.HLS else ProviderSupport.kind(url),
+                            if (key == "ra") "Server 1" else key,
+                        )
                     }
                     val versions = server.optJSONArray("versions") ?: continue
                     for (v in 0 until versions.length()) {
@@ -119,7 +129,12 @@ object Toonix {
                         if (versionSrc.isBlank()) continue
                         val url = if (versionSrc.startsWith("http")) versionSrc else BASE + versionSrc
                         val label = version.optString("label").ifBlank { key }
-                        add(url, if (versionSrc.contains("/api/stream/")) MediaKind.HLS else ProviderSupport.kind(url), label)
+                        val server = if (key == "ra") "Server 1" else key
+                        add(
+                            url,
+                            if (versionSrc.contains("/api/stream/")) MediaKind.HLS else ProviderSupport.kind(url),
+                            listOf(server, label).filter { it.isNotBlank() }.joinToString(" · "),
+                        )
                     }
                 }
             }
