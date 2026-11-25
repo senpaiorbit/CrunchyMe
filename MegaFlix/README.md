@@ -38,6 +38,18 @@ refresh so CloudStream downloads the new extensions. MegaFlix will discover them
 Auto-install is on by default. Turn it off under **MegaFlix → Settings → Home screen → Auto-install
 repositories** if you prefer to manage repositories yourself.
 
+### Mass install every provider
+
+**MegaFlix → Settings → Mass install** reads every repository in the official CloudStream catalog,
+resolves every plugin list, and shows the total provider count and download size. The install button
+uses CloudStream's own `PluginManager` downloader to install every working provider package (currently
+about 700 providers / 140 MB across 40 repositories).
+
+This is still CloudStream's native extension system, not copied provider source. After the install
+finishes, restart CloudStream; all downloaded providers register themselves and MegaFlix aggregates
+them. Providers marked down in their repository manifest are skipped. The first CloudStream start
+after a full mass install may take noticeably longer.
+
 ## Settings
 
 | Section | What it changes |
@@ -54,6 +66,7 @@ repositories** if you prefer to manage repositories yourself.
 | Providers | Per-provider block list. New providers are enabled by default; `Enable all` clears the block list. |
 | Home screen | Number of home rows borrowed from installed providers. `0` hides them. |
 | Repository catalog | Install every repository from the official CloudStream catalog. |
+| Mass install | Download every working provider package from all catalog repositories. |
 | About & diagnostics | Provider counts, failures and a health reset. |
 
 ## How a request works
@@ -170,5 +183,9 @@ parser. They do not need an emulator.
 - A provider that returns a series as a movie, or a movie as a series, may need its own fix.
 - Some providers only implement `load` and return no `loadLinks`; those show no playable links.
 - Repository installation does not force an immediate CloudStream extension refresh.
+- Mass install downloads CloudStream extension packages; it does not copy their provider source into
+  MegaFlix. Restart CloudStream after the install so the new providers register.
+- Installing 700+ extensions is heavy. It uses about 140 MB, and the first startup can be slow on
+  low-memory devices. Install only the repositories you need if that is a problem.
 - MegaFlix is not a source of content and does not grant rights to any content. Use providers and
   content you are allowed to access.

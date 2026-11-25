@@ -2,8 +2,10 @@
 
 package com.megaflix
 
+import android.app.Activity
 import android.app.Dialog
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.content.res.ColorStateList
 import android.graphics.Color
@@ -51,7 +53,8 @@ object MegaFlixSettingsUi {
         PROVIDERS("Providers", "Choose which installed extensions MegaFlix can call", "02"),
         HOME("Home screen", "Provider rows and source-count labels", "03"),
         CATALOG("Repository catalog", "Install every CloudStream repository", "04"),
-        ABOUT("About & diagnostics", "Health, limits and how it works", "05"),
+        MASS("Mass install", "Install every provider from every repository", "05"),
+        ABOUT("About & diagnostics", "Health, limits and how it works", "06"),
     }
 
     private class SheetDialog(context: Context) :
@@ -121,6 +124,9 @@ object MegaFlixSettingsUi {
             page.addView(ui.tile(Section.CATALOG, "Add every CloudStream repository") {
                 renderDetail(Section.CATALOG)
             })
+            page.addView(ui.tile(Section.MASS, "All providers, one install") {
+                renderDetail(Section.MASS)
+            })
             page.addView(ui.tile(Section.ABOUT) { renderDetail(Section.ABOUT) })
 
             page.addView(
@@ -148,6 +154,7 @@ object MegaFlixSettingsUi {
                 Section.PROVIDERS -> renderProviders(page, ui) { renderDetail(Section.PROVIDERS) }
                 Section.HOME -> renderHomeSettings(page, ui) { renderDetail(Section.HOME) }
                 Section.CATALOG -> renderCatalog(page, ui)
+                Section.MASS -> renderMass(page, ui, context.findActivity())
                 Section.ABOUT -> renderAbout(page, ui)
             }
             root.addView(ui.scroll(page))
@@ -413,6 +420,105 @@ object MegaFlixSettingsUi {
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.WRAP_CONTENT,
         ).apply { topMargin = ui.dp(12) })
+    }
+
+    private fun renderMass(page: LinearLayout, ui: Ui, activity: Activity?) {
+        page.addView(ui.label(
+            "This uses CloudStream’s own extension installer to download every working provider from the official repository catalog. MegaFlix then discovers and aggregates them after CloudStream restarts.",
+            13f,
+            TEXT_DIM,
+        ))
+        val status = ui.label("Reading repositories…", 12f, TEXT_FAINT).apply {
+            setPadding(0, ui.dp(14), 0, ui.dp(10))
+        }
+        page.addView(status)
+        val install = ui.button("Install all providers", accent = true) {}
+        install.isEnabled = false
+        install.alpha = 0.55f
+        page.addView(install, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+        ))
+        val refresh = ui.button("Rescan catalog") {}
+        page.addView(refresh, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+        ).apply { topMargin = ui.dp(8) })
+
+        val note = ui.label(
+            "700+ extensions is a large install (roughly 140 MB). The first CloudStream start after installing may take a while. Providers that are marked down are skipped.",
+            11f,
+            TEXT_FAINT,
+        ).apply { setPadding(0, ui.dp(14), 0, 0) }
+        page.addView(note)
+
+        var catalog: MassCatalog? = null
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+
+        fun showCatalog(value: MassCatalog?) {
+            catalog = value
+            if (value == null) {
+                status.text = "Could not read the repository catalog. Check your connection and rescan."
+                install.isEnabled = false
+                install.alpha = 0.55f
+                return
+            }
+            val mb = value.totalBytes / (1024.0 * 1024.0)
+            status.text = "${value.repositoryCount} repositories · ${value.plugins.size} providers · ${"%.1f".format(mb)} MB" +
+                if (value.skippedDown > 0) " · ${value.skippedDown} marked down skipped" else ""
+            install.text = "Install ${value.plugins.size} providers"
+            install.isEnabled = activity != null && value.plugins.isNotEmpty()
+            install.alpha = if (install.isEnabled) 1f else 0.55f
+        }
+
+        fun scan(force: Boolean) {
+            install.isEnabled = false
+            install.alpha = 0.55f
+            status.text = "Reading repositories…"
+            scope.launch {
+                val value = runCatching { MassInstaller.discover(force) }.getOrNull()
+                showCatalog(value)
+            }
+        }
+
+        install.setOnClickListener {
+            val value = catalog ?: return@setOnClickListener
+            val target = activity ?: return@setOnClickListener
+            install.isEnabled = false
+            refresh.isEnabled = false
+            install.alpha = 0.55f
+            status.text = "Installing 0/${value.plugins.size}…"
+            scope.launch {
+                val report = runCatching {
+                    MassInstaller.installAll(target, value) { done, total, name ->
+                        scope.launch { status.text = "Installing $done/$total · ${name.take(40)}" }
+                    }
+                }.getOrNull()
+                install.isEnabled = true
+                refresh.isEnabled = true
+                install.alpha = 1f
+                if (report == null) {
+                    status.text = "Install stopped unexpectedly. Rescan and try again."
+                } else {
+                    ProviderHealth.reset()
+                    status.text = report.summary() + ". Restart CloudStream to load the new extensions."
+                }
+            }
+        }
+
+        refresh.setOnClickListener {
+            if (activity == null) {
+                status.text = "Open MegaFlix settings from CloudStream so the installer has an Activity context."
+                return@setOnClickListener
+            }
+            scan(force = true)
+        }
+
+        if (activity == null) {
+            status.text = "Open MegaFlix settings from CloudStream so the installer has an Activity context."
+        } else {
+            scan(force = false)
+        }
     }
 
     private fun renderAbout(page: LinearLayout, ui: Ui) {
@@ -736,4 +842,10 @@ object MegaFlixSettingsUi {
             Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
         }
     }
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }

@@ -25,6 +25,8 @@ This repository also ships **MegaFlix**, a provider that does not scrape a site 
 providers installed in CloudStream, runs their own search/load/link methods, groups duplicate titles,
 and merges playable links. Install it from the same repository, then use **MegaFlix → Settings** to
 choose the provider pool and optionally add every repository from the official CloudStream catalog.
+**Mass install** can download every working provider from all 40 official repositories and register
+them for aggregation.
 
 MegaFlix is intentionally separate from CrunchyMe: CrunchyMe owns its metadata and stream farm,
 while MegaFlix is a runtime aggregator over whatever else is installed. See
