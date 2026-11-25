@@ -1,8 +1,8 @@
 [
     {
-        "url": "https://github.com/senpaiorbit/CrunchyMe/raw/builds/CrunchyMe-dabcd51cc0e9.cs3",
+        "url": "https://github.com/senpaiorbit/CrunchyMe/raw/builds/CrunchyMe-9157dc3b3119.cs3",
         "status": 1,
-        "version": 16,
+        "version": 17,
         "name": "CrunchyMe",
         "internalName": "CrunchyMe",
         "authors": [
@@ -18,19 +18,19 @@
         ],
         "iconUrl": "https://raw.githubusercontent.com/senpaiorbit/CrunchyMe/main/CrunchyMe/icon.png",
         "apiVersion": 1,
-        "fileHash": "sha256-05c61342127aeaddf2dcdeb0d7079b430eaa7b247384e9d59d35b98122308309"
+        "fileHash": "sha256-6b253ff9060fd1b892c0e58bd1115e39081bdb12ba8a7b97b283bbc6c2d2c49d"
     },
     {
-        "url": "https://github.com/senpaiorbit/CrunchyMe/raw/builds/MegaFlix-dabcd51cc0e9.cs3",
+        "url": "https://github.com/senpaiorbit/CrunchyMe/raw/builds/MegaFlix-9157dc3b3119.cs3",
         "status": 1,
-        "version": 16,
+        "version": 17,
         "name": "MegaFlix",
         "internalName": "MegaFlix",
         "authors": [
             "MegaFlix"
         ],
         "description": "One search across every installed CloudStream provider. Groups duplicate titles, labels source counts, and aggregates playable links without bundling other extensions.",
-        "fileSize": 89524,
+        "fileSize": 103645,
         "repositoryUrl": "https://github.com/senpaiorbit/CrunchyMe",
         "language": "en",
         "tvTypes": [
@@ -46,6 +46,6 @@
         ],
         "iconUrl": "https://raw.githubusercontent.com/senpaiorbit/CrunchyMe/main/MegaFlix/icon.png",
         "apiVersion": 1,
-        "fileHash": "sha256-a386e2899d5d006dcd7878a217fb5665642556cfbfe77a28c634f80ee8e0c1de"
+        "fileHash": "sha256-be575300b2ce72699c022663fc29104283e8b88cc73b28cfe6787ccb97fdf6c7"
     }
 ]
