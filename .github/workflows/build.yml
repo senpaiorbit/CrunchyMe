@@ -116,8 +116,8 @@ jobs:
           import json, os
           slug = os.environ["GITHUB_REPOSITORY"]
           repo = {
-              "name": "CrunchyMe",
-              "description": "TMDB-first catalog with a pluggable multi-source stream farm",
+              "name": "CrunchyMe + MegaFlix",
+              "description": "CrunchyMe plus MegaFlix, a runtime aggregator over installed CloudStream providers",
               "manifestVersion": 1,
               "pluginLists": [f"https://github.com/{slug}/raw/builds/plugins.json"],
           }
