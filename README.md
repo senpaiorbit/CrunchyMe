@@ -355,6 +355,7 @@ Test coverage:
 | "No playable streams" | Check **Settings → Providers**; enable VidBolt/Vidrift/Vidly, add a Stremio addon, or add a custom provider. Not every title is available. |
 | Only low quality appears | Lower the minimum quality; some archive files are 480p. |
 | A source stopped working | **Reset health**, then **Clear caches**; the source may be temporarily blocked. |
+| Plugin update throws `DigestException` / hash mismatch | Clear CloudStream's repository/plugin cache or remove and re-add the repo once. An old cached plugin list can still point at `raw.githubusercontent.com`, which jsDelivr may serve stale; new builds use `github.com/raw` with a matching `fileHash`. |
 | Build fails on `sdk.dir` | Create `local.properties` with `sdk.dir=/path/to/Android/Sdk`. |
 
 ## License

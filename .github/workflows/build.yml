@@ -85,6 +85,17 @@ jobs:
               plugin["url"] = url
           with open(path, "w") as f:
               json.dump(plugins, f, indent=4)
+
+          # A raw.githubusercontent.com URL can be rewritten to jsDelivr, which may
+          # serve an older branch file. Fail the build if that URL or the hash is wrong.
+          import hashlib
+          for plugin in plugins:
+              if plugin["url"].startswith("https://raw.githubusercontent.com/"):
+                  raise SystemExit("plugin URL must not use raw.githubusercontent.com")
+              file = os.path.join(os.environ["GITHUB_WORKSPACE"], "builds", plugin["internalName"] + ".cs3")
+              digest = "sha256-" + hashlib.sha256(open(file, "rb").read()).hexdigest()
+              if plugin.get("fileHash") != digest:
+                  raise SystemExit(f"fileHash mismatch for {plugin['internalName']}")
           PY
           python3 - <<'PY'
           import json, os
