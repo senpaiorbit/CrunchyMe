@@ -60,17 +60,25 @@ jobs:
 
       - name: Publish artifacts
         run: |
-          rm -f "$GITHUB_WORKSPACE/builds"/*.cs3 "$GITHUB_WORKSPACE/builds"/plugins.json
-          find "$GITHUB_WORKSPACE/src" -name '*.cs3' -exec cp {} "$GITHUB_WORKSPACE/builds/" \;
+          rm -f "$GITHUB_WORKSPACE/builds"/plugins.json
+          for file in $(find "$GITHUB_WORKSPACE/src" -name '*.cs3'); do
+            base="$(basename "$file" .cs3)"
+            cp "$file" "$GITHUB_WORKSPACE/builds/${base}-${GITHUB_SHA:0:12}.cs3"
+          done
           find "$GITHUB_WORKSPACE/src" -name 'plugins.json' -exec cp {} "$GITHUB_WORKSPACE/builds/" \;
           python3 - <<'PY'
           import json, os
+          from urllib.parse import urlsplit, urlunsplit
+
           path = os.path.join(os.environ["GITHUB_WORKSPACE"], "builds", "plugins.json")
           with open(path) as f:
               plugins = json.load(f)
           tag = os.environ.get("GITHUB_SHA", "dev")[:12]
           for plugin in plugins:
+              internal = plugin["internalName"]
+              artifact = f"{internal}-{tag}.cs3"
               url = plugin.get("url", "")
+
               # GitHub's raw host is optionally rewritten to jsDelivr by CloudStream,
               # and jsDelivr can serve a cached old branch file. Use github.com/raw
               # so the downloaded bytes always match fileHash.
@@ -80,22 +88,29 @@ jobs:
                   parts = rest.split("/", 3)
                   if len(parts) == 4:
                       url = f"https://github.com/{parts[0]}/{parts[1]}/raw/{parts[2]}/{parts[3]}"
-              if url and "?" not in url:
-                  url = f"{url}?v={tag}"
-              plugin["url"] = url
+
+              # A stable CrunchyMe.cs3 is overwritten by every build. A client with a
+              # cached older plugins.json would then download the new bytes and fail
+              # the digest check. Publish an immutable per-commit file and keep old
+              # artifacts in the builds branch so cached manifests stay valid.
+              parts = urlsplit(url)
+              directory = parts.path.rsplit("/", 1)[0]
+              plugin["url"] = urlunsplit((parts.scheme, parts.netloc, f"{directory}/{artifact}", "", ""))
           with open(path, "w") as f:
               json.dump(plugins, f, indent=4)
 
-          # A raw.githubusercontent.com URL can be rewritten to jsDelivr, which may
-          # serve an older branch file. Fail the build if that URL or the hash is wrong.
+          # Fail the build if the immutable file is missing or its hash is wrong.
           import hashlib
           for plugin in plugins:
               if plugin["url"].startswith("https://raw.githubusercontent.com/"):
                   raise SystemExit("plugin URL must not use raw.githubusercontent.com")
-              file = os.path.join(os.environ["GITHUB_WORKSPACE"], "builds", plugin["internalName"] + ".cs3")
+              artifact = plugin["url"].rsplit("/", 1)[-1]
+              file = os.path.join(os.environ["GITHUB_WORKSPACE"], "builds", artifact)
               digest = "sha256-" + hashlib.sha256(open(file, "rb").read()).hexdigest()
               if plugin.get("fileHash") != digest:
                   raise SystemExit(f"fileHash mismatch for {plugin['internalName']}")
+              if plugin.get("fileSize") not in (None, os.path.getsize(file)):
+                  raise SystemExit(f"fileSize mismatch for {plugin['internalName']}")
           PY
           python3 - <<'PY'
           import json, os

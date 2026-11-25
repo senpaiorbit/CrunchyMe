@@ -41,10 +41,11 @@ git push -u origin main
 ```
 
 The first workflow run creates the `builds` branch and publishes the artifacts.
-Each CI build uses the workflow run number as the plugin version, and the published plugin URL
-includes a build tag. Plugin downloads use `github.com/<repo>/raw/...` rather than
-`raw.githubusercontent.com`, so CloudStream's optional jsDelivr proxy cannot serve an old cached
-`.cs3` whose bytes no longer match `fileHash`.
+Each CI build uses the workflow run number as the plugin version and publishes an immutable
+`<plugin>-<commit>.cs3`. The manifest points at that exact file and old artifacts are kept, so a
+cached older `plugins.json` cannot download a newer file and fail its digest check. Plugin downloads
+use `github.com/<repo>/raw/...` rather than `raw.githubusercontent.com`, so CloudStream's optional
+jsDelivr proxy cannot serve an old cached `.cs3` whose bytes no longer match `fileHash`.
 
 ## First run: add a TMDB key
 
@@ -355,7 +356,7 @@ Test coverage:
 | "No playable streams" | Check **Settings → Providers**; enable VidBolt/Vidrift/Vidly, add a Stremio addon, or add a custom provider. Not every title is available. |
 | Only low quality appears | Lower the minimum quality; some archive files are 480p. |
 | A source stopped working | **Reset health**, then **Clear caches**; the source may be temporarily blocked. |
-| Plugin update throws `DigestException` / hash mismatch | Clear CloudStream's repository/plugin cache or remove and re-add the repo once. An old cached plugin list can still point at `raw.githubusercontent.com`, which jsDelivr may serve stale; new builds use `github.com/raw` with a matching `fileHash`. |
+| Plugin update throws `DigestException` / hash mismatch | Clear CloudStream's repository/plugin cache or remove and re-add the repo once. This can happen when an old cached `plugins.json` points at the shared `CrunchyMe.cs3`, which a newer build has replaced. New builds publish immutable `<plugin>-<commit>.cs3` files and keep old artifacts, so the mismatch stops after one cache refresh. |
 | Build fails on `sdk.dir` | Create `local.properties` with `sdk.dir=/path/to/Android/Sdk`. |
 
 ## License
