@@ -401,7 +401,7 @@ object SettingsUi {
         artworkCard.addView(
             ui.toggleRow(
                 "Better posters (btttr.cc)",
-                "Uses BetterPosters artwork for cards and details. Off uses TMDB/OMDb posters.",
+                "Off by default. Uses BetterPosters artwork when enabled; otherwise TMDB/OMDb posters.",
                 Settings.btttrPostersEnabled(),
             ) { Settings.saveBtttrPostersEnabled(it) },
         )
@@ -409,7 +409,7 @@ object SettingsUi {
         artworkCard.addView(
             ui.toggleRow(
                 "TheTVDB episode metadata",
-                "Episode names, stills and runtimes from TheTVDB, with TMDB/OMDb fallback.",
+                "English episode names, stills and runtimes from TheTVDB, with TMDB/OMDb fallback.",
                 Settings.tvdbEpisodesEnabled(),
             ) { Settings.saveTvdbEpisodesEnabled(it) },
         )
@@ -554,8 +554,8 @@ object SettingsUi {
         intro.addView(
             ui.label(
                 "Each section has its own priority scale. Default workers: 2 streaming, " +
-                    "2 file index, 4 anime (only for Animation/Anime). Without animation: " +
-                    "2 streaming + 6 file index.",
+                    "2 file index, 4 anime. Anime starts first for Animation/Anime titles; " +
+                    "without animation: 2 streaming + 6 file index.",
                 12f, TEXT_FAINT,
             ).apply { setPadding(0, ui.dp(8), 0, 0) },
         )

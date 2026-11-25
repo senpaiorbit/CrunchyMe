@@ -92,7 +92,7 @@ object Settings {
     }
 
     fun btttrPostersEnabled(): Boolean =
-        prefs()?.getBoolean(KEY_BTTR_POSTERS, true) ?: true
+        prefs()?.getBoolean(KEY_BTTR_POSTERS, false) ?: false
 
     fun saveBtttrPostersEnabled(value: Boolean) {
         prefs()?.edit()?.putBoolean(KEY_BTTR_POSTERS, value)?.apply()

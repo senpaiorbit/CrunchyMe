@@ -17,6 +17,7 @@ object Tvdb {
 
     private const val API_KEY = "9d89c164-ee5c-484f-b7f8-63a127119870"
     private const val BASE = "https://api4.thetvdb.com/v4"
+    private const val LANG = "eng"
     private const val TTL_MS = 6 * 60 * 60 * 1000L
     private const val MAX_ENTRIES = 128
     private const val TOKEN_TTL_MS = 12 * 60 * 60 * 1000L
@@ -89,9 +90,10 @@ object Tvdb {
     }
 
     private suspend fun seriesById(id: Int): Series? {
-        val key = "series:$id"
+        val key = "series:$id:$LANG"
         val root = cached(key) { get("/series/$id") } ?: return null
-        return parseSeries(root.optJSONObject("data"))
+        val base = parseSeries(root.optJSONObject("data")) ?: return null
+        return translated(base)
     }
 
     private suspend fun searchRemote(id: String, type: String): Series? {
@@ -102,15 +104,25 @@ object Tvdb {
         for (index in 0 until array.length()) {
             val item = array.optJSONObject(index) ?: continue
             val series = item.optJSONObject("series") ?: continue
-            parseSeries(series)?.let { return it }
+            parseSeries(series)?.let { return translated(it) }
         }
         return null
     }
 
+    private suspend fun translated(series: Series): Series {
+        val key = "translation:${series.id}:$LANG"
+        val data = cached(key) { get("/series/${series.id}/translations/$LANG") }
+            ?.optJSONObject("data") ?: return series
+        return series.copy(
+            name = data.optString("name").trim().ifBlank { series.name },
+            overview = data.optString("overview").trim().ifBlank { series.overview },
+        )
+    }
+
     private suspend fun seasonEpisodes(seriesId: Int, season: Int): List<Ep> {
-        val key = "episodes:$seriesId:$season"
+        val key = "episodes:$seriesId:$season:$LANG"
         val path = buildString {
-            append("/series/$seriesId/episodes/default")
+            append("/series/$seriesId/episodes/default/$LANG")
             if (season > 0) append("?season=$season")
             append(if (season > 0) "&page=0" else "?page=0")
         }
@@ -167,7 +179,11 @@ object Tvdb {
         val auth = login() ?: return null
         val body = Http.text(
             BASE + path,
-            mapOf("Authorization" to "Bearer $auth", "Accept" to "application/json"),
+            mapOf(
+                "Authorization" to "Bearer $auth",
+                "Accept" to "application/json",
+                "Accept-Language" to "en",
+            ),
             20,
         )
         if (body == null) {
@@ -175,7 +191,11 @@ object Tvdb {
             val retry = login() ?: return null
             val retryBody = Http.text(
                 BASE + path,
-                mapOf("Authorization" to "Bearer $retry", "Accept" to "application/json"),
+                mapOf(
+                    "Authorization" to "Bearer $retry",
+                    "Accept" to "application/json",
+                    "Accept-Language" to "en",
+                ),
                 20,
             ) ?: return null
             return runCatching { JSONObject(retryBody) }.getOrNull()

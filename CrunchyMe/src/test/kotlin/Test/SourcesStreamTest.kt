@@ -30,6 +30,18 @@ class SourcesStreamTest {
     )
 
     @Test
+    fun animeSectionStartsFirst() {
+        assertEquals(
+            listOf(ServerCategory.ANIMATION, ServerCategory.STREAMING, ServerCategory.FILE_INDEX),
+            Sources.categoryOrder(isAnime = true),
+        )
+        assertEquals(
+            listOf(ServerCategory.STREAMING, ServerCategory.FILE_INDEX, ServerCategory.ANIMATION),
+            Sources.categoryOrder(isAnime = false),
+        )
+    }
+
+    @Test
     fun defaultWorkersSplitBySection() {
         val animation = Sources.workerCounts(8, true, true, true)
         assertEquals(2, animation[ServerCategory.STREAMING])

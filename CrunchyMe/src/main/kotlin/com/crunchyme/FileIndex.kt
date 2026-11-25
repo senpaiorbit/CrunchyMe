@@ -419,6 +419,7 @@ object FileIndex {
         return path.endsWith(".mkv", true) || path.endsWith(".mp4", true) ||
             path.endsWith(".m3u8", true) || path.endsWith(".mpd", true) ||
             href.contains("r2.cloudflarestorage.com", true) ||
+            href.contains("video-downloads.googleusercontent.com", true) ||
             href.contains("pixeldrain", true) || href.contains("workers.dev", true)
     }
 

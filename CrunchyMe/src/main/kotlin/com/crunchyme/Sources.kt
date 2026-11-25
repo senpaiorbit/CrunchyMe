@@ -170,12 +170,13 @@ object Sources {
                 "anime=${counts[ServerCategory.ANIMATION]}",
         )
 
-        val queues = ServerCategory.values().associateWith { Channel<Task>(Channel.UNLIMITED) }
-        tasks.forEach { queues[it.category]!!.send(it) }
+        val categoryOrder = categoryOrder(request.isAnime)
+        val queues = categoryOrder.associateWith { Channel<Task>(Channel.UNLIMITED) }
+        tasks.forEach { queues[it.category]?.send(it) }
         queues.values.forEach { it.close() }
 
         val workers = buildList {
-            for (category in ServerCategory.values()) {
+            for (category in categoryOrder) {
                 repeat(counts[category] ?: 0) {
                     add(launch {
                         for (task in queues[category]!!) {
@@ -195,6 +196,13 @@ object Sources {
         }
         workers.joinAll()
     }
+
+    internal fun categoryOrder(isAnime: Boolean): List<ServerCategory> =
+        if (isAnime) {
+            listOf(ServerCategory.ANIMATION, ServerCategory.STREAMING, ServerCategory.FILE_INDEX)
+        } else {
+            listOf(ServerCategory.STREAMING, ServerCategory.FILE_INDEX, ServerCategory.ANIMATION)
+        }
 
     suspend fun collect(
         request: LinkRequest,

@@ -33,8 +33,10 @@ object Btttr {
 
     fun clearCache() = cache.clear()
 
-    fun posterByImdb(imdbId: String?, type: String): String? {
-        if (!Settings.btttrPostersEnabled()) return null
+    fun posterByImdb(imdbId: String?, type: String): String? =
+        if (!Settings.btttrPostersEnabled()) null else posterUrl(imdbId, type)
+
+    internal fun posterUrl(imdbId: String?, type: String): String? {
         val id = imdbId?.trim()?.takeIf { it.startsWith("tt") } ?: return null
         val kind = if (type == "movie") "movie" else "series"
         return "$BASE/poster/$kind/$id/auto~gr.png?nocache=1"

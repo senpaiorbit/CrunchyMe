@@ -66,8 +66,8 @@ bundled into the plugin and never sent anywhere except `api.themoviedb.org`.
 | Minimum quality | Drops streams whose height is *known* to be below the floor (480p / 720p / 1080p / Any). Unknown heights are kept. |
 | Provider sections | **Streaming**, **File index** and **Anime & animation** are ordered independently. Each section has its own priority scale from 1 to the number of providers in that section; the highest number starts first. Drag inside a section or type the number. Changing priority alone does not clear cached links. |
 | Parallel tasks | Total workers, 2–10 (default 8). The default split is 2 streaming, 2 file index and 4 anime. Anime workers only start when TMDB/OMDb genres include Animation or Anime; otherwise the split is 2 streaming and 6 file index. Extra configured workers go to file index first. |
-| Better posters | On by default. Uses btttr.cc BetterPosters artwork for cards and details; turn it off to use TMDB/OMDb posters. The home carousel uses the title logo; other rows use posters. |
-| TheTVDB episodes | On by default. Uses TheTVDB v4 episode names, stills and runtimes, falling back to TMDB/OMDb when a series is missing or the API is unavailable. |
+| Better posters | Off by default. When enabled, uses btttr.cc BetterPosters artwork for cards and details; the default remains TMDB/OMDb posters. The home carousel uses the title logo; other rows use posters. |
+| TheTVDB episodes | On by default. Uses TheTVDB v4 English translations for episode names, stills and runtimes, falling back to TMDB/OMDb when a series or translation is missing. |
 | Internet Archive | Built-in legal source for public-domain films. |
 | Built-in servers | Turn individual providers on or off (VidBolt, Vidrift, Vidly, Bingr, NetMirror, MovieBox, NetNaija, Toonix, …). |
 | Stremio / Nuvio addons | Enables the addon source. |
@@ -103,12 +103,14 @@ bundled into the plugin and never sent anywhere except `api.themoviedb.org`.
 - **TMDB** is the default catalog. It supplies search, home rows, cast, trailers, logos and the
   external IDs used by the other services.
 - **TheTVDB v4** is used for TV episode metadata. The provider reads the TVDB id from TMDB
-  `external_ids`, then falls back to a TVDB remote-id search by TMDB or IMDb id. If TheTVDB has no
-  series or episode data, the TMDB/OMDb episode list is used unchanged. Episodes are always grouped
-  by a positive season number, so single-season and absolute-numbered shows still render as a
-  season instead of one flat stack.
-- **BetterPosters (btttr.cc)** is on by default. The meta endpoint accepts `tmdb:<id>`, so cards do
-  not need an extra IMDb lookup. If btttr has no artwork, the TMDB/OMDb poster is used.
+  `external_ids`, then falls back to a TVDB remote-id search by TMDB or IMDb id. Series and episode
+  requests use the `eng` translation, so anime titles do not fall back to Japanese names and
+  overviews. If TheTVDB has no series, translation or episode data, the TMDB/OMDb episode list is
+  used unchanged. Episodes are always grouped by a positive season number, so single-season and
+  absolute-numbered shows still render as a season instead of one flat stack.
+- **BetterPosters (btttr.cc)** is off by default. When enabled, the meta endpoint accepts
+  `tmdb:<id>`, so cards do not need an extra IMDb lookup. If btttr has no artwork, the TMDB/OMDb
+  poster is used.
 - **TheIntroDB** intro/recap/credits/preview skipping is built into CloudStream. CrunchyMe adds
   both the TMDb and IMDb ids to `LoadResponse`, so the app's skip lookup works. The public
   `api.theintrodb.org/v4/media` endpoint does not require the API key for reads; the key is only
@@ -144,7 +146,7 @@ Anime & animation section is skipped entirely when the title has no Animation/An
 | Toonix | Embed | on | Parses the Next.js RSC/flight payload, `legacySrc`, `/api/stream/s/…` and Hydrax sources. Cartoons and animation; runs only for Animation/Anime genres. |
 | Toonix Anime | Embed | on | Same resolver for anime titles; runs only when TMDB/OMDb genres include Animation/Anime. |
 | 4KHDHub | File index | on | Reads the search cards and follows HubCloud/greenmotors links to R2 files. The site's search index is inconsistent. |
-| FSLv1 | File index | on | VegaMovies Typesense search, then `nexdrive`/`fastdl` to a direct Google video URL. |
+| FSLv1 | File index | on | VegaMovies Typesense search, then `nexdrive`/`vcloud`/`fastdl`. V-Cloud R2 links are preferred because they stream; the fastdl Google video URL is the fallback. |
 | FSLv2 | File index | on | Same FSL resolver pointed at RogMovies; useful when VegaMovies is down. |
 | HindMoviez | File index | on | WordPress search plus HubCloud/greenmotors/links-index resolution. |
 | HDHub4u | File index | on | Search page plus HubCloud, HubDrive, Pixeldrain and greenmotors. |
@@ -156,10 +158,11 @@ Anime & animation section is skipped entirely when the title has no Animation/An
 
 Enable or disable any of them in **Settings → Providers**. Providers are split into Streaming,
 File index and Anime & animation cards. Each row has an on/off switch, a drag handle, the site
-favicon and a local priority from 1 to the section size. The highest number runs first. If a server
-is slow or blocked, lower its priority or turn it off; the remaining sources still run. The health
-breaker also disables a repeatedly failing server for five minutes, and
-**Maintenance → Reset source health** clears that state.
+favicon and a local priority from 1 to the section size. The highest number runs first. For an
+Animation/Anime title the Anime & animation queue is started before Streaming, so anime-specific
+sources get the first chance to return links. If a server is slow or blocked, lower its priority or
+turn it off; the remaining sources still run. The health breaker also disables a repeatedly failing
+server for five minutes, and **Maintenance → Reset source health** clears that state.
 
 These resolvers do not bypass DRM, logins, or bot challenges. A Cloudflare interstitial is detected
 and skipped rather than treated as an empty result. File-index sites sometimes publish only ZIP
@@ -279,8 +282,9 @@ private object MySource {
   every provider.
 - **Priority scheduling.** Each section starts in its own saved order. Streaming starts with
   MovieBox, Vidrift, VidLink, VidBolt and Vidly; file index and anime have independent scales.
-- **Section workers.** 2 streaming, 2 file index and 4 anime by default. The anime queue is
-  skipped without an Animation/Anime genre, which gives file index 6 workers.
+- **Section workers.** 2 streaming, 2 file index and 4 anime by default. For Animation/Anime
+  titles the anime queue starts first; without an animation genre the anime queue is skipped and
+  file index gets 6 workers.
 - **Per-source timeouts** (45 s farm, 12 s per addon, 6–20 s per HTTP call) and a circuit breaker
   that disables a source after four consecutive failures for five minutes.
 - **Caching**: TMDB 15 min, resolved links 2 min (signed MovieBox URLs expire quickly), addon manifests 6 h. Re-opening an episode is
