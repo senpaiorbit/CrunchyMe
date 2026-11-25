@@ -8,7 +8,8 @@ object Settings {
     const val TMDB_LINK = "https://www.themoviedb.org/settings/api"
     const val OMDB_LINK = "https://www.omdbapi.com/apikey.aspx"
     const val DEFAULT_FLOOR = 720
-    const val DEFAULT_PARALLEL = 6
+    const val DEFAULT_PARALLEL = 8
+    const val MAX_PARALLEL = 10
 
     private const val PREFS = "crunchyme_settings"
     private const val KEY_TMDB = "tmdb_key"
@@ -23,7 +24,10 @@ object Settings {
     private const val KEY_PRIORITY = "server_priority"
     private const val KEY_PARALLEL = "parallel_tasks"
     private const val KEY_SERVER_SCHEMA = "server_schema"
+    private const val KEY_BTTR_POSTERS = "btttr_posters"
+    private const val KEY_TVDB_EPISODES = "tvdb_episodes"
     private const val SERVER_SCHEMA = 2
+    private const val SECTION_PRIORITY_PREFIX = "server_priority_"
 
     @Volatile
     private var appContext: Context? = null
@@ -85,6 +89,22 @@ object Settings {
     fun saveQualityFloor(value: Int) {
         prefs()?.edit()?.putInt(KEY_FLOOR, value)?.apply()
         LinkCache.clear()
+    }
+
+    fun btttrPostersEnabled(): Boolean =
+        prefs()?.getBoolean(KEY_BTTR_POSTERS, true) ?: true
+
+    fun saveBtttrPostersEnabled(value: Boolean) {
+        prefs()?.edit()?.putBoolean(KEY_BTTR_POSTERS, value)?.apply()
+        Btttr.clearCache()
+    }
+
+    fun tvdbEpisodesEnabled(): Boolean =
+        prefs()?.getBoolean(KEY_TVDB_EPISODES, true) ?: true
+
+    fun saveTvdbEpisodesEnabled(value: Boolean) {
+        prefs()?.edit()?.putBoolean(KEY_TVDB_EPISODES, value)?.apply()
+        Tvdb.clearCache()
     }
 
     fun archiveEnabled(): Boolean = prefs()?.getBoolean(KEY_ARCHIVE, true) ?: true
@@ -178,63 +198,114 @@ object Settings {
         LinkCache.clear()
     }
 
-    /** Saved order first; unknown/new providers are appended in their default order. */
-    fun serverPriority(): List<String> {
+    private fun legacyServerOrder(): List<String> {
         val known = ServerFarm.all.map { it.id }
-        val saved = prefs()?.getString(KEY_PRIORITY, null)
+        return prefs()?.getString(KEY_PRIORITY, null)
             .orEmpty()
             .split(',')
             .map { it.trim() }
             .filter { it in known }
             .distinct()
-        val base = if (saved.isEmpty()) ServerFarm.defaultPriorityOrder() else saved
-        return ((base + ServerFarm.defaultPriorityOrder() + known).distinct().filterNot { it == "movy" } + "movy")
-            .distinct()
     }
 
-    fun saveServerPriority(order: List<String>) {
-        val known = ServerFarm.all.map { it.id }
+    fun defaultSectionOrder(category: ServerCategory): List<String> {
+        val known = ServerFarm.inCategory(category).map { it.id }
+        return ServerFarm.defaultPriorityOrder().filter { it in known }
+    }
+
+    /** Saved order for one section, with new providers appended and the old global order as fallback. */
+    fun serverSectionPriority(category: ServerCategory): List<String> {
+        val known = ServerFarm.inCategory(category).map { it.id }
+        val key = SECTION_PRIORITY_PREFIX + category.name.lowercase()
+        val saved = prefs()?.getString(key, null)
+            .orEmpty()
+            .split(',')
+            .map { it.trim() }
+            .filter { it in known }
+            .distinct()
+        val migrated = legacyServerOrder().filter { it in known }
+        val base = saved.ifEmpty { migrated }
+        return (base + defaultSectionOrder(category) + known).distinct()
+    }
+
+    /** Global order is the concatenation of streaming, file index and animation sections. */
+    fun serverPriority(): List<String> =
+        ServerCategory.values().flatMap { serverSectionPriority(it) }.distinct()
+
+    fun saveSectionPriority(category: ServerCategory, order: List<String>) {
+        val known = ServerFarm.inCategory(category).map { it.id }
         prefs()?.edit()?.putString(
-            KEY_PRIORITY,
+            SECTION_PRIORITY_PREFIX + category.name.lowercase(),
             order.filter { it in known }.distinct().joinToString(","),
         )?.apply()
     }
 
+    fun saveServerPriority(order: List<String>) {
+        ServerCategory.values().forEach { category ->
+            val ids = order.filter { ServerFarm.categoryOf(it) == category }
+            saveSectionPriority(category, ids)
+        }
+    }
+
     /** Apply a draft from the providers screen in one write. Order-only edits keep the link cache. */
     fun saveServerState(enabled: Set<String>, order: List<String>) {
+        val orders = ServerCategory.values().associateWith { category ->
+            order.filter { ServerFarm.categoryOf(it) == category }
+        }
+        saveServerState(enabled, orders)
+    }
+
+    fun saveServerState(enabled: Set<String>, orders: Map<ServerCategory, List<String>>) {
         val oldEnabled = serverEnabledIds()
-        val oldOrder = serverPriority()
-        if (oldEnabled == enabled && oldOrder == order) return
+        val oldOrders = ServerCategory.values().associateWith { serverSectionPriority(it) }
+        val normalized = ServerCategory.values().associateWith { category ->
+            val known = ServerFarm.inCategory(category).map { it.id }
+            (orders[category].orEmpty().filter { it in known } + defaultSectionOrder(category) + known)
+                .distinct()
+        }
+        if (oldEnabled == enabled && oldOrders == normalized) return
         val known = ServerFarm.all.map { it.id }
-        prefs()?.edit()
-            ?.putStringSet(KEY_SERVERS, HashSet(enabled.filter { it in known }))
-            ?.putString(KEY_PRIORITY, order.filter { it in known }.distinct().joinToString(","))
-            ?.putInt(KEY_SERVER_SCHEMA, SERVER_SCHEMA)
-            ?.apply()
+        val editor = prefs()?.edit() ?: return
+        editor.putStringSet(KEY_SERVERS, HashSet(enabled.filter { it in known }))
+        normalized.forEach { (category, order) ->
+            editor.putString(
+                SECTION_PRIORITY_PREFIX + category.name.lowercase(),
+                order.joinToString(","),
+            )
+        }
+        editor.putInt(KEY_SERVER_SCHEMA, SERVER_SCHEMA)
+        editor.apply()
         if (oldEnabled != enabled) LinkCache.clear()
     }
 
     fun moveServer(id: String, delta: Int) {
-        val order = serverPriority().toMutableList()
+        val category = ServerFarm.categoryOf(id)
+        val order = serverSectionPriority(category).toMutableList()
         val index = order.indexOf(id)
         if (index < 0) return
         val target = (index + delta).coerceIn(0, order.lastIndex)
         if (target == index) return
         val item = order.removeAt(index)
         order.add(target, item)
-        saveServerPriority(order)
+        saveSectionPriority(category, order)
     }
 
     fun resetServerPriority() {
-        prefs()?.edit()?.remove(KEY_PRIORITY)?.apply()
+        val editor = prefs()?.edit() ?: return
+        editor.remove(KEY_PRIORITY)
+        ServerCategory.values().forEach { category ->
+            editor.remove(SECTION_PRIORITY_PREFIX + category.name.lowercase())
+        }
+        editor.apply()
         LinkCache.clear()
     }
 
     fun parallelLevel(): Int =
-        (prefs()?.getInt(KEY_PARALLEL, DEFAULT_PARALLEL) ?: DEFAULT_PARALLEL).coerceIn(1, 16)
+        (prefs()?.getInt(KEY_PARALLEL, DEFAULT_PARALLEL) ?: DEFAULT_PARALLEL)
+            .coerceIn(1, MAX_PARALLEL)
 
     fun saveParallelLevel(value: Int) {
-        prefs()?.edit()?.putInt(KEY_PARALLEL, value.coerceIn(1, 16))?.apply()
+        prefs()?.edit()?.putInt(KEY_PARALLEL, value.coerceIn(1, MAX_PARALLEL))?.apply()
     }
 
     fun enabledServers(): List<ServerSpec> {

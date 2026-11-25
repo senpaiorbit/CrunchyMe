@@ -6,6 +6,7 @@ import com.lagradost.cloudstream3.HomePageResponse
 import com.lagradost.cloudstream3.LoadResponse
 import com.lagradost.cloudstream3.LoadResponse.Companion.addImdbId
 import com.lagradost.cloudstream3.LoadResponse.Companion.addScore
+import com.lagradost.cloudstream3.LoadResponse.Companion.addTMDbId
 import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
 import com.lagradost.cloudstream3.MainAPI
 import com.lagradost.cloudstream3.MainPageData
@@ -70,11 +71,12 @@ class CrunchyMeProvider : MainAPI() {
         if (catalog() == CatalogProvider.IMDB) return imdbHome(request)
         if (!Tmdb.hasKey()) return null
         val items = Tmdb.row(request.data, page) ?: return null
+        val metas = Btttr.enrich(items)
         val logos = if (request.horizontalImages) {
             coroutineScope {
                 items.take(6).map { item ->
                     async {
-                        withTimeoutOrNull(2_500) {
+                        metas[item.id]?.logo ?: withTimeoutOrNull(2_500) {
                             runCatching { Tmdb.detail(item.id, item.type)?.logo }.getOrNull()
                         }
                     }
@@ -84,7 +86,10 @@ class CrunchyMeProvider : MainAPI() {
             emptyList()
         }
         val cards = items.mapIndexedNotNull { index, item ->
-            item.toCard(logos.getOrNull(index))
+            item.toCard(
+                logo = logos.getOrNull(index),
+                poster = metas[item.id]?.poster,
+            )
         }
         if (cards.isEmpty()) return null
         return newHomePageResponse(request, cards)
@@ -97,7 +102,9 @@ class CrunchyMeProvider : MainAPI() {
         }
         val tmdb = if (Tmdb.hasKey()) Tmdb.search(query) else null
         if (!tmdb.isNullOrEmpty()) {
-            return tmdb.mapNotNull { it.toCard() }.takeIf { it.isNotEmpty() }
+            val metas = Btttr.enrich(tmdb)
+            return tmdb.mapNotNull { it.toCard(poster = metas[it.id]?.poster) }
+                .takeIf { it.isNotEmpty() }
         }
         return Omdb.search(query).mapNotNull { it.toCard() }.takeIf { it.isNotEmpty() }
     }
@@ -158,27 +165,49 @@ class CrunchyMeProvider : MainAPI() {
         } else {
             Refs.tv(id, detail.imdbId)
         }
+        val btttr = withTimeoutOrNull(4_000) {
+            runCatching { Btttr.meta(id, detail.type) }.getOrNull()
+        }
+        val tvdb = if (detail.type == "tv") {
+            withTimeoutOrNull(4_000) {
+                runCatching { Tvdb.series(id, detail.imdbId, detail.tvdbId) }.getOrNull()
+            }
+        } else {
+            null
+        }
+        val title = tvdb?.name ?: detail.title
+        val poster = btttr?.poster ?: tvdb?.image ?: detail.poster
+        val backdrop = btttr?.background ?: detail.backdrop
+        val logo = btttr?.logo ?: detail.logo
+        val displayPlot = tvdb?.overview ?: detail.overview
+        val displayYear = tvdb?.year ?: detail.year
+        val displayRuntime = tvdb?.runtime ?: detail.runtime
+        val trailers = trailerVariants(detail.trailer, btttr?.trailers)
 
         if (ref.type == "movie") {
-            return newMovieLoadResponse(detail.title, url, TvType.Movie, dataUrl) {
-                posterUrl = detail.poster
-                backgroundPosterUrl = detail.backdrop
-                year = detail.year
-                plot = detail.overview
+            return newMovieLoadResponse(title, url, TvType.Movie, dataUrl) {
+                posterUrl = poster
+                backgroundPosterUrl = backdrop
+                year = displayYear
+                plot = displayPlot
                 tags = detail.genres
                 actors = detail.cast.map { ActorData(Actor(it.name, it.photo), roleString = it.character) }
-                duration = detail.runtime
+                duration = displayRuntime
                 detail.imdbId?.let { addImdbId(it) }
+                addTMDbId(id.toString())
                 detail.score?.let { addScore(it.toString(), 10) }
-                logoUrl = detail.logo
-                addTrailer(detail.trailer, referer = "https://www.youtube.com/")
+                logoUrl = logo
+                addTrailer(trailers, referer = null)
             }
         }
 
-        val episodes = Tmdb.episodes(id)
-            .filter { it.season > 0 && it.number > 0 }
-            .distinctBy { it.season to it.number }
-            .sortedWith(compareBy({ it.season }, { it.number }))
+        val tmdbEpisodes = Tmdb.episodes(id)
+        val tvdbEpisodes = withTimeoutOrNull(8_000) {
+            runCatching {
+                Tvdb.episodes(id, detail.imdbId, detail.tvdbId, detail.seasonNumbers)
+            }.getOrNull()
+        }.orEmpty()
+        val episodes = mergeEpisodes(tmdbEpisodes, tvdbEpisodes)
         if (episodes.isEmpty()) return null
         val episodeList = episodes.map { ep ->
             newEpisode(Refs.episode(id, detail.imdbId, ep.season, ep.number)) {
@@ -193,62 +222,178 @@ class CrunchyMeProvider : MainAPI() {
             }
         }
 
-        return newTvSeriesLoadResponse(detail.title, url, TvType.TvSeries, episodeList) {
-            posterUrl = detail.poster
-            backgroundPosterUrl = detail.backdrop
-            year = detail.year
-            plot = detail.overview
+        return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodeList) {
+            posterUrl = poster
+            backgroundPosterUrl = backdrop
+            year = displayYear
+            plot = displayPlot
             tags = detail.genres
             actors = detail.cast.map { ActorData(Actor(it.name, it.photo), roleString = it.character) }
-            duration = detail.runtime
+            duration = displayRuntime
             detail.imdbId?.let { addImdbId(it) }
+            addTMDbId(id.toString())
             detail.score?.let { addScore(it.toString(), 10) }
-            logoUrl = detail.logo
-            addTrailer(detail.trailer, referer = "https://www.youtube.com/")
+            logoUrl = logo
+            addTrailer(trailers, referer = null)
         }
+    }
+
+    private data class EpisodeRow(
+        val season: Int,
+        val number: Int,
+        val name: String?,
+        val overview: String?,
+        val still: String?,
+        val airDate: String?,
+        val runtime: Int?,
+        val rating: Double?,
+    )
+
+    private fun mergeEpisodes(
+        tmdb: List<Tmdb.Ep>,
+        tvdb: List<Tvdb.Ep>,
+    ): List<EpisodeRow> {
+        val tvdbMap = tvdb.associateBy { it.season to it.number }
+        val rows = LinkedHashMap<Pair<Int, Int>, EpisodeRow>()
+        for (ep in tmdb) {
+            val season = ep.season.coerceAtLeast(1)
+            val number = ep.number.coerceAtLeast(1)
+            if (season <= 0 || number <= 0) continue
+            val extra = tvdbMap[season to number]
+            rows[season to number] = EpisodeRow(
+                season = season,
+                number = number,
+                name = extra?.name ?: ep.name,
+                overview = extra?.overview ?: ep.overview,
+                still = extra?.still ?: ep.still,
+                airDate = extra?.airDate ?: ep.airDate,
+                runtime = extra?.runtime ?: ep.runtime,
+                rating = ep.rating,
+            )
+        }
+        for (ep in tvdb) {
+            if (ep.season <= 0 || ep.number <= 0) continue
+            rows.putIfAbsent(
+                ep.season to ep.number,
+                EpisodeRow(
+                    season = ep.season,
+                    number = ep.number,
+                    name = ep.name,
+                    overview = ep.overview,
+                    still = ep.still,
+                    airDate = ep.airDate,
+                    runtime = ep.runtime,
+                    rating = null,
+                ),
+            )
+        }
+        return rows.values.sortedWith(compareBy({ it.season }, { it.number }))
+    }
+
+    private fun trailerVariants(first: String?, rest: List<String>?): List<String> {
+        val raw = buildList {
+            first?.let { add(it) }
+            rest?.let { addAll(it) }
+        }
+        val ids = raw.mapNotNull { url ->
+            Regex("""(?:[?&]v=|youtu\.be/|/embed/|/shorts/)([\w-]{11})""")
+                .find(url)?.groupValues?.get(1)
+        }.distinct().take(3)
+        val watch = ids.map { "https://www.youtube.com/watch?v=$it" }
+        val fallback = ids.take(1).flatMap { id ->
+            listOf(
+                "https://youtu.be/$id",
+                "https://www.youtube-nocookie.com/embed/$id",
+                "https://m.youtube.com/watch?v=$id",
+            )
+        }
+        return (watch + fallback).distinct()
     }
 
     private suspend fun omdbLoad(url: String, detail: Omdb.Detail): LoadResponse? {
         val dataUrl = Refs.imdb(detail.imdbId, detail.type)
         val cast = detail.actors.map { ActorData(Actor(it, null)) }
+        val btttr = withTimeoutOrNull(4_000) {
+            runCatching { Btttr.metaByImdb(detail.imdbId, detail.type) }.getOrNull()
+        }
+        val tvdb = if (detail.type == "tv") {
+            withTimeoutOrNull(4_000) {
+                runCatching { Tvdb.series(0, detail.imdbId, null) }.getOrNull()
+            }
+        } else {
+            null
+        }
+        val poster = btttr?.poster ?: Btttr.posterByImdb(detail.imdbId, detail.type)
+            ?: tvdb?.image ?: detail.poster
+        val title = tvdb?.name ?: detail.title
+        val trailers = trailerVariants(null, btttr?.trailers)
         if (detail.type == "movie") {
-            return newMovieLoadResponse(detail.title, url, TvType.Movie, dataUrl) {
-                posterUrl = detail.poster
-                backgroundPosterUrl = detail.poster
-                year = detail.year
-                plot = detail.overview
+            return newMovieLoadResponse(title, url, TvType.Movie, dataUrl) {
+                posterUrl = poster
+                backgroundPosterUrl = btttr?.background ?: detail.poster
+                year = tvdb?.year ?: detail.year
+                plot = tvdb?.overview ?: detail.overview
                 tags = detail.genres
                 actors = cast
-                duration = detail.runtime
+                duration = tvdb?.runtime ?: detail.runtime
                 addImdbId(detail.imdbId)
                 detail.score?.takeIf { it > 0 }?.let { addScore(it.toString(), 10) }
+                logoUrl = btttr?.logo
+                addTrailer(trailers, referer = null)
             }
         }
 
-        val episodes = Omdb.episodes(detail.imdbId)
-            .filter { it.season > 0 && it.number > 0 }
-            .distinctBy { it.season to it.number }
-            .sortedWith(compareBy({ it.season }, { it.number }))
+        val omdbEpisodes = Omdb.episodes(detail.imdbId)
+        val tvdbEpisodes = withTimeoutOrNull(8_000) {
+            runCatching {
+                Tvdb.episodes(
+                    tmdbId = 0,
+                    imdbId = detail.imdbId,
+                    tvdbId = null,
+                    seasons = (1..detail.totalSeasons.coerceAtMost(40)).toList(),
+                )
+            }.getOrNull()
+        }.orEmpty()
+        val episodes = mergeEpisodes(
+            omdbEpisodes.map {
+                Tmdb.Ep(
+                    season = it.season,
+                    number = it.number,
+                    name = it.name,
+                    overview = null,
+                    still = null,
+                    airDate = it.airDate,
+                    rating = it.rating,
+                    runtime = null,
+                )
+            },
+            tvdbEpisodes,
+        )
         if (episodes.isEmpty()) return null
         val episodeList = episodes.map { ep ->
             newEpisode(Refs.imdb(detail.imdbId, "tv", ep.season, ep.number)) {
                 name = ep.name ?: "Episode ${ep.number}"
                 season = ep.season
                 episode = ep.number
+                description = ep.overview
+                posterUrl = ep.still
                 ep.rating?.takeIf { it > 0 }?.let { score = Score.from10(it) }
+                ep.runtime?.let { runTime = it }
                 ep.airDate?.let { date -> runCatching { addDate(date) } }
             }
         }
-        return newTvSeriesLoadResponse(detail.title, url, TvType.TvSeries, episodeList) {
-            posterUrl = detail.poster
-            backgroundPosterUrl = detail.poster
-            year = detail.year
-            plot = detail.overview
+        return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodeList) {
+            posterUrl = poster
+            backgroundPosterUrl = btttr?.background ?: detail.poster
+            year = tvdb?.year ?: detail.year
+            plot = tvdb?.overview ?: detail.overview
             tags = detail.genres
             actors = cast
-            duration = detail.runtime
+            duration = tvdb?.runtime ?: detail.runtime
             addImdbId(detail.imdbId)
             detail.score?.takeIf { it > 0 }?.let { addScore(it.toString(), 10) }
+            logoUrl = btttr?.logo
+            addTrailer(trailers, referer = null)
         }
     }
 
@@ -285,8 +430,9 @@ class CrunchyMeProvider : MainAPI() {
             title = title,
             year = tmdbDetail?.year ?: omdbDetail?.year,
             originalLanguage = tmdbDetail?.originalLanguage,
-            isAnime = (tmdbDetail?.genres ?: omdbDetail?.genres).orEmpty()
-                .any { it.equals("Animation", true) || it.equals("Anime", true) },
+            isAnime = (
+                tmdbDetail?.genres?.takeIf { it.isNotEmpty() } ?: omdbDetail?.genres.orEmpty()
+                ).any { it.equals("Animation", true) || it.equals("Anime", true) },
         )
 
         val floor = Settings.qualityFloor()
@@ -407,31 +553,33 @@ class CrunchyMeProvider : MainAPI() {
 
     private fun Omdb.Hit.toCard(): SearchResponse {
         val url = Refs.imdb(imdbId, type)
+        val poster = Btttr.posterByImdb(imdbId, type) ?: this@toCard.poster
         return if (type == "movie") {
             newMovieSearchResponse(title, url, TvType.Movie) {
-                posterUrl = this@toCard.poster
+                posterUrl = poster
                 year = this@toCard.year
             }
         } else {
             newTvSeriesSearchResponse(title, url, TvType.TvSeries) {
-                posterUrl = this@toCard.poster
+                posterUrl = poster
                 year = this@toCard.year
             }
         }
     }
 
-    private fun Tmdb.Item.toCard(logo: String? = null): SearchResponse? {
+    private fun Tmdb.Item.toCard(logo: String? = null, poster: String? = null): SearchResponse? {
         if (title.isBlank()) return null
         val url = if (type == "movie") Refs.movie(id) else Refs.tv(id)
+        val image = logo ?: poster ?: this@toCard.poster
         return if (type == "movie") {
             newMovieSearchResponse(title, url, TvType.Movie) {
-                posterUrl = logo ?: this@toCard.poster
+                posterUrl = image
                 year = this@toCard.year
                 score = this@toCard.score?.let { Score.from10(it) }
             }
         } else {
             newTvSeriesSearchResponse(title, url, TvType.TvSeries) {
-                posterUrl = logo ?: this@toCard.poster
+                posterUrl = image
                 year = this@toCard.year
                 score = this@toCard.score?.let { Score.from10(it) }
             }

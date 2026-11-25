@@ -113,6 +113,7 @@ object Sources {
 
     private data class Task(
         val id: String,
+        val category: ServerCategory,
         val block: suspend () -> List<Candidate>,
     )
 
@@ -129,22 +130,25 @@ object Sources {
         val tasks = buildList {
             for (spec in config.servers) {
                 if (!Health.isHealthy(spec.id)) continue
+                if (spec.category == ServerCategory.ANIMATION && !request.isAnime) continue
                 if (spec.animeOnly && !request.isAnime) continue
-                add(Task(spec.id) { BuiltinServerSource(spec).resolve(request) })
+                add(Task(spec.id, spec.category) { BuiltinServerSource(spec).resolve(request) })
             }
             for (provider in config.providers.filter { it.enabled }) {
                 val id = CustomProviderSource.providerId(provider)
                 if (!Health.isHealthy(id)) continue
-                add(Task(id) { CustomProviderSource(provider).resolve(request) })
+                add(Task(id, ServerCategory.STREAMING) { CustomProviderSource(provider).resolve(request) })
             }
             if (config.archiveEnabled && Health.isHealthy(ArchiveSource.ID)) {
-                add(Task(ArchiveSource.ID) { ArchiveSource.resolve(request) })
+                add(Task(ArchiveSource.ID, ServerCategory.STREAMING) { ArchiveSource.resolve(request) })
             }
             if (config.stremioEnabled &&
                 config.addonUrls.any { StremioSource.normalize(it) != null } &&
                 Health.isHealthy(StremioSource.ID)
             ) {
-                add(Task(StremioSource.ID) { StremioSource.resolve(request, config.addonUrls) })
+                add(Task(StremioSource.ID, ServerCategory.STREAMING) {
+                    StremioSource.resolve(request, config.addonUrls)
+                })
             }
         }
 
@@ -153,22 +157,39 @@ object Sources {
             return@supervisorScope
         }
 
-        val queue = Channel<Task>(Channel.UNLIMITED)
-        tasks.forEach { queue.send(it) }
-        queue.close()
+        val byCategory = tasks.groupBy { it.category }
+        val counts = workerCounts(
+            total = config.parallelism.coerceIn(1, Settings.MAX_PARALLEL),
+            hasStreaming = byCategory[ServerCategory.STREAMING].orEmpty().isNotEmpty(),
+            hasFileIndex = byCategory[ServerCategory.FILE_INDEX].orEmpty().isNotEmpty(),
+            hasAnimation = byCategory[ServerCategory.ANIMATION].orEmpty().isNotEmpty(),
+        )
+        log(
+            "workers streaming=${counts[ServerCategory.STREAMING]} " +
+                "file=${counts[ServerCategory.FILE_INDEX]} " +
+                "anime=${counts[ServerCategory.ANIMATION]}",
+        )
 
-        val workers = List(config.parallelism.coerceIn(1, 16)) {
-            launch {
-                for (task in queue) {
-                    val result = guard(task.id, log, task.block)
-                    if (result.isEmpty()) continue
-                    try {
-                        onResult(task.id, result)
-                    } catch (c: kotlinx.coroutines.CancellationException) {
-                        throw c
-                    } catch (t: Throwable) {
-                        log("${task.id}: result handler failed - ${t.javaClass.simpleName}")
-                    }
+        val queues = ServerCategory.values().associateWith { Channel<Task>(Channel.UNLIMITED) }
+        tasks.forEach { queues[it.category]!!.send(it) }
+        queues.values.forEach { it.close() }
+
+        val workers = buildList {
+            for (category in ServerCategory.values()) {
+                repeat(counts[category] ?: 0) {
+                    add(launch {
+                        for (task in queues[category]!!) {
+                            val result = guard(task.id, log, task.block)
+                            if (result.isEmpty()) continue
+                            try {
+                                onResult(task.id, result)
+                            } catch (c: kotlinx.coroutines.CancellationException) {
+                                throw c
+                            } catch (t: Throwable) {
+                                log("${task.id}: result handler failed - ${t.javaClass.simpleName}")
+                            }
+                        }
+                    })
                 }
             }
         }
@@ -183,6 +204,59 @@ object Sources {
         val all = Collections.synchronizedList(mutableListOf<Candidate>())
         stream(request, config, log) { _, items -> all.addAll(items) }
         return all.toList().distinctBy { it.url }
+    }
+
+    /**
+     * 2 streaming workers, 2 file-index workers and 4 anime workers for the default 8.
+     * Without an animation genre the anime allocation goes to file index (2 + 6).
+     * Any extra user-configured workers go to file index first.
+     */
+    internal fun workerCounts(
+        total: Int,
+        hasStreaming: Boolean,
+        hasFileIndex: Boolean,
+        hasAnimation: Boolean,
+    ): Map<ServerCategory, Int> {
+        val counts = ServerCategory.values().associateWith { 0 }.toMutableMap()
+        val active = buildList {
+            if (hasStreaming) add(ServerCategory.STREAMING)
+            if (hasFileIndex) add(ServerCategory.FILE_INDEX)
+            if (hasAnimation) add(ServerCategory.ANIMATION)
+        }
+        if (active.isEmpty()) return counts
+        var remaining = total.coerceAtLeast(1)
+        if (remaining < active.size) {
+            active.forEach { category ->
+                if (remaining > 0) {
+                    counts[category] = 1
+                    remaining--
+                }
+            }
+            return counts
+        }
+        active.forEach { counts[it] = 1 }
+        remaining -= active.size
+
+        if (hasStreaming && remaining > 0) {
+            val extra = minOf(1, remaining)
+            counts[ServerCategory.STREAMING] = counts[ServerCategory.STREAMING]!! + extra
+            remaining -= extra
+        }
+        if (hasAnimation && remaining > 0) {
+            val extra = minOf(3, remaining)
+            counts[ServerCategory.ANIMATION] = counts[ServerCategory.ANIMATION]!! + extra
+            remaining -= extra
+        }
+        if (remaining > 0) {
+            val fallback = when {
+                hasFileIndex -> ServerCategory.FILE_INDEX
+                hasAnimation -> ServerCategory.ANIMATION
+                hasStreaming -> ServerCategory.STREAMING
+                else -> null
+            }
+            if (fallback != null) counts[fallback] = counts[fallback]!! + remaining
+        }
+        return counts
     }
 
     private suspend fun guard(

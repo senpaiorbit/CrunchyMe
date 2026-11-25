@@ -6,6 +6,7 @@ import android.app.Dialog
 import android.content.Context
 import android.content.Intent
 import android.content.res.ColorStateList
+import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
@@ -27,6 +28,7 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -53,8 +55,8 @@ private val WARNING = Color.parseColor("#FFB4AB")
 object SettingsUi {
 
     private enum class Section(val title: String, val subtitle: String, val index: String) {
-        PLAYBACK("Playback", "TMDB key, quality floor, built-in toggles", "01"),
-        PROVIDERS("Providers", "Built-in stream servers", "02"),
+        PLAYBACK("Playback", "TMDB key, artwork, quality and workers", "01"),
+        PROVIDERS("Providers", "Streaming, file index and anime sections", "02"),
         ADDONS("Addons", "Stremio and Nuvio manifests", "03"),
         CUSTOM("Custom sources", "URL templates and JSON endpoints", "04"),
         MAINTENANCE("Maintenance", "Caches, health, and storage", "05"),
@@ -157,6 +159,9 @@ object SettingsUi {
                     Settings.saveQualityFloor(Settings.DEFAULT_FLOOR)
                     Settings.saveArchiveEnabled(true)
                     Settings.saveStremioEnabled(true)
+                    Settings.saveBtttrPostersEnabled(true)
+                    Settings.saveTvdbEpisodesEnabled(true)
+                    Settings.saveParallelLevel(Settings.DEFAULT_PARALLEL)
                 }
                 Section.PROVIDERS -> Settings.saveServerState(
                     ServerFarm.defaultEnabledIds(),
@@ -391,16 +396,43 @@ object SettingsUi {
         qualityCard.addView(chips)
         body.addView(qualityCard)
 
+        val artworkCard = ui.card()
+        artworkCard.addView(ui.sectionLabel("ARTWORK & EPISODE METADATA"))
+        artworkCard.addView(
+            ui.toggleRow(
+                "Better posters (btttr.cc)",
+                "Uses BetterPosters artwork for cards and details. Off uses TMDB/OMDb posters.",
+                Settings.btttrPostersEnabled(),
+            ) { Settings.saveBtttrPostersEnabled(it) },
+        )
+        artworkCard.addView(ui.divider(top = ui.dp(6), bottom = ui.dp(6)))
+        artworkCard.addView(
+            ui.toggleRow(
+                "TheTVDB episode metadata",
+                "Episode names, stills and runtimes from TheTVDB, with TMDB/OMDb fallback.",
+                Settings.tvdbEpisodesEnabled(),
+            ) { Settings.saveTvdbEpisodesEnabled(it) },
+        )
+        artworkCard.addView(
+            ui.label(
+                "Intro/outro skip is handled by CloudStream's built-in TheIntroDB using the " +
+                    "TMDb/IMDb ids supplied here.",
+                11f, TEXT_FAINT,
+            ).apply { setPadding(0, ui.dp(8), 0, 0) },
+        )
+        body.addView(artworkCard)
+
         val parallelCard = ui.card()
         parallelCard.addView(ui.sectionLabel("PARALLEL TASKS"))
         parallelCard.addView(
             ui.label(
-                "How many providers resolve at once. Higher is faster but uses more memory and data.",
+                "Default 8: 2 streaming + 2 file index + 4 anime. Anime workers start only " +
+                    "for Animation/Anime titles; otherwise 2 streaming + 6 file index. Max 10.",
                 13f, TEXT_DIM,
             ).apply { setPadding(0, ui.dp(6), 0, ui.dp(10)) },
         )
         val parallelChips = LinearLayout(ui.context).apply { orientation = LinearLayout.HORIZONTAL }
-        listOf(2, 4, 6, 8, 12, 16).forEach { value ->
+        listOf(2, 4, 6, 8, 10).forEach { value ->
             parallelChips.addView(ui.chip("$value", Settings.parallelLevel() == value) {
                 Settings.saveParallelLevel(value)
                 rerender(Section.PLAYBACK)
@@ -426,45 +458,64 @@ object SettingsUi {
     }
 
     private fun providers(ui: Ui, body: LinearLayout): () -> Unit {
-        val order = Settings.serverPriority().toMutableList()
         val enabled = Settings.serverEnabledIds().toMutableSet()
+        val orders = LinkedHashMap<ServerCategory, MutableList<String>>()
+        ServerCategory.values().forEach { category ->
+            orders[category] = Settings.serverSectionPriority(category).toMutableList()
+        }
         val rows = LinkedHashMap<String, Row>()
-        lateinit var container: LinearLayout
+        val containers = LinkedHashMap<ServerCategory, LinearLayout>()
         var dragId: String? = null
         var summary: TextView? = null
 
-        fun scoreFor(index: Int): Int = when {
-            order.size <= 1 -> 100
-            else -> 100 - (index * 99 / (order.size - 1))
+        fun scoreFor(category: ServerCategory, index: Int): Int =
+            (orders[category].orEmpty().size - index).coerceAtLeast(1)
+
+        fun indexForScore(category: ServerCategory, score: Int): Int {
+            val size = orders[category].orEmpty().size
+            if (size <= 1) return 0
+            return (size - score.coerceIn(1, size)).coerceIn(0, size - 1)
         }
 
-        fun indexForScore(score: Int): Int = when {
-            order.size <= 1 -> 0
-            else -> ((100 - score) * (order.size - 1) / 99.0).roundToInt()
-                .coerceIn(0, order.lastIndex)
+        fun updateSummary() {
+            val total = orders.values.sumOf { it.size }
+            summary?.text = "${enabled.size} of $total on · " +
+                ServerCategory.values().joinToString(" · ") { category ->
+                    "${category.title} ${orders[category].orEmpty().size}"
+                } +
+                ". Priority N starts first, 1 runs last. Drag the handle to reorder inside a section."
         }
 
         fun persist() {
-            Settings.saveServerState(enabled, order)
-            summary?.text = "${enabled.size} of ${order.size} on. Priority 100 starts first; " +
-                "drag the handle to reorder. Changes save immediately."
+            Settings.saveServerState(
+                enabled,
+                orders.mapValues { it.value.toList() },
+            )
+            updateSummary()
         }
 
         fun refresh() {
-            order.forEachIndexed { index, id ->
-                val row = rows[id] ?: return@forEachIndexed
-                row.rank.text = "#${index + 1}"
-                if (!row.score.hasFocus()) row.score.setText(scoreFor(index).toString())
+            ServerCategory.values().forEach { category ->
+                orders[category].orEmpty().forEachIndexed { index, id ->
+                    val row = rows[id] ?: return@forEachIndexed
+                    row.rank.text = "#${index + 1}"
+                    if (!row.score.hasFocus()) {
+                        row.score.setText(scoreFor(category, index).toString())
+                    }
+                    row.score.hint = orders[category].orEmpty().size.toString()
+                }
             }
         }
 
-        fun moveTo(id: String, target: Int, save: Boolean = true) {
+        fun moveTo(category: ServerCategory, id: String, target: Int, save: Boolean = true) {
+            val order = orders[category] ?: return
             val from = order.indexOf(id)
             if (from < 0) return
             val to = target.coerceIn(0, order.lastIndex)
             if (from == to) return
             val item = order.removeAt(from)
             order.add(to, item)
+            val container = containers[category] ?: return
             rows[id]?.root?.let { view ->
                 container.removeView(view)
                 container.addView(view, to.coerceIn(0, container.childCount))
@@ -473,179 +524,201 @@ object SettingsUi {
             if (save) persist()
         }
 
-        fun applyScore(id: String, raw: String?) {
-            val value = raw?.filter { it.isDigit() }?.toIntOrNull()?.coerceIn(1, 100)
+        fun applyScore(category: ServerCategory, id: String, raw: String?) {
+            val size = orders[category].orEmpty().size
+            if (size <= 0) return
+            val value = raw?.filter { it.isDigit() }?.toIntOrNull()?.coerceIn(1, size)
             if (value == null) {
                 refresh()
                 return
             }
-            moveTo(id, indexForScore(value))
+            moveTo(category, id, indexForScore(category, value))
             refresh()
             persist()
         }
 
-        fun targetAt(rawY: Float): Int {
+        fun targetAt(container: LinearLayout, rawY: Float): Int {
             for (index in 0 until container.childCount) {
                 val child = container.getChildAt(index)
                 val location = IntArray(2)
                 child.getLocationOnScreen(location)
                 if (rawY < location[1] + child.height / 2f) return index
             }
-            return order.lastIndex.coerceAtLeast(0)
+            return (container.childCount - 1).coerceAtLeast(0)
         }
 
         val intro = ui.card()
         intro.addView(ui.label("Stream farm", 17f, TEXT, medium = true))
-        summary = ui.label(
-            "${enabled.size} of ${order.size} on. Priority 100 starts first; " +
-                "drag the handle to reorder. Changes save immediately.",
-            13f, TEXT_DIM,
-        ).apply { setPadding(0, ui.dp(6), 0, 0) }
+        summary = ui.label("", 13f, TEXT_DIM).apply { setPadding(0, ui.dp(6), 0, 0) }
         intro.addView(summary)
+        intro.addView(
+            ui.label(
+                "Each section has its own priority scale. Default workers: 2 streaming, " +
+                    "2 file index, 4 anime (only for Animation/Anime). Without animation: " +
+                    "2 streaming + 6 file index.",
+                12f, TEXT_FAINT,
+            ).apply { setPadding(0, ui.dp(8), 0, 0) },
+        )
         body.addView(intro)
 
-        val card = ui.card()
-        card.addView(ui.sectionLabel("PROVIDERS · ON/OFF & PRIORITY"))
-        card.addView(
-            ui.label(
-                "Lower numbers run later. Tap the number to type a value from 1 to 100.",
-                12f, TEXT_FAINT,
-            ).apply { setPadding(0, ui.dp(6), 0, ui.dp(10)) },
-        )
-        container = LinearLayout(ui.context).apply { orientation = LinearLayout.VERTICAL }
-        card.addView(container)
-        body.addView(card)
-
-        order.forEachIndexed { index, id ->
-            val spec = ServerFarm.spec(id) ?: return@forEachIndexed
-
-            val root = LinearLayout(ui.context).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(0, ui.dp(7), 0, ui.dp(7))
-            }
-            val top = LinearLayout(ui.context).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-            }
-            val handle = ui.textButton("≡", TEXT_FAINT, 20f) {}.apply {
-                contentDescription = "Drag to reorder ${spec.name}"
-                layoutParams = LinearLayout.LayoutParams(ui.dp(28), ui.dp(40))
-            }
-            top.addView(handle)
-            top.addView(ui.monogram(spec.name))
-            val texts = LinearLayout(ui.context).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(ui.dp(10), 0, ui.dp(8), 0)
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-            }
-            val titleRow = LinearLayout(ui.context).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-            }
-            titleRow.addView(ui.label(spec.name, 14f, TEXT, medium = true))
-            val rank = ui.label("#${index + 1}", 10f, TEXT_FAINT, medium = true, spacing = 0.06f).apply {
-                setPadding(ui.dp(7), 0, 0, 0)
-            }
-            titleRow.addView(rank)
-            texts.addView(titleRow)
-            val kind = when {
-                spec.animeOnly -> "anime"
-                spec.speed == ServerSpeed.SLOW -> "file index"
-                else -> "stream"
-            }
-            texts.addView(
-                ui.label("${spec.note} · $kind", 11f, TEXT_FAINT).apply {
-                    setPadding(0, ui.dp(3), 0, 0)
-                    maxLines = 1
-                    ellipsize = TextUtils.TruncateAt.END
-                },
+        ServerCategory.values().forEach { category ->
+            val order = orders[category] ?: return@forEach
+            val card = ui.card()
+            card.addView(ui.sectionLabel("${category.title.uppercase()} · ${order.size}"))
+            card.addView(
+                ui.label(
+                    when (category) {
+                        ServerCategory.STREAMING ->
+                            "Direct stream APIs and embeds. 2 workers."
+                        ServerCategory.FILE_INDEX ->
+                            "Search/index pages that expose file links. 2 workers, or 6 when there is no animation genre."
+                        ServerCategory.ANIMATION ->
+                            "Only runs when the title has the Animation or Anime genre. 4 workers."
+                    },
+                    12f, TEXT_FAINT,
+                ).apply { setPadding(0, ui.dp(6), 0, ui.dp(10)) },
             )
-            top.addView(texts)
-            val toggle = ui.toggleControl(enabled.contains(id)) { on ->
-                if (on) enabled += id else enabled -= id
-                persist()
-            }
-            top.addView(toggle.view)
-            root.addView(top)
+            val container = LinearLayout(ui.context).apply { orientation = LinearLayout.VERTICAL }
+            containers[category] = container
+            card.addView(container)
+            body.addView(card)
 
-            val priorityRow = LinearLayout(ui.context).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(ui.dp(38), ui.dp(5), 0, 0)
-            }
-            priorityRow.addView(
-                ui.label("PRIORITY", 9f, TEXT_FAINT, medium = true, spacing = 0.12f),
-            )
-            priorityRow.addView(ui.spacer())
-            val down = ui.textButton("▾", TEXT_DIM, 18f) {
-                applyScore(id, (scoreFor(order.indexOf(id)) - 5).coerceAtLeast(1).toString())
-            }.apply { contentDescription = "Lower ${spec.name} priority" }
-            val score = EditText(ui.context).apply {
-                setText(scoreFor(index).toString())
-                setHint("50")
-                setHintTextColor(TEXT_FAINT)
-                setTextColor(TEXT)
-                setSelectAllOnFocus(true)
-                inputType = InputType.TYPE_CLASS_NUMBER
-                typeface = Typeface.MONOSPACE
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-                gravity = Gravity.CENTER
-                setPadding(0, 0, 0, 0)
-                background = ui.inputBackground()
-                layoutParams = LinearLayout.LayoutParams(ui.dp(54), ui.dp(36))
-                setOnFocusChangeListener { _, focused ->
-                    if (!focused) applyScore(id, text.toString())
-                }
-                setOnEditorActionListener { _, actionId, event ->
-                    if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_DONE ||
-                        event?.keyCode == KeyEvent.KEYCODE_ENTER
-                    ) {
-                        applyScore(id, text.toString())
-                        clearFocus()
-                        true
-                    } else {
-                        false
-                    }
-                }
-            }
-            val up = ui.textButton("▴", TEXT_DIM, 18f) {
-                applyScore(id, (scoreFor(order.indexOf(id)) + 5).coerceAtMost(100).toString())
-            }.apply { contentDescription = "Raise ${spec.name} priority" }
-            priorityRow.addView(down)
-            priorityRow.addView(score)
-            priorityRow.addView(up)
-            root.addView(priorityRow)
+            order.forEachIndexed { index, id ->
+                val spec = ServerFarm.spec(id) ?: return@forEachIndexed
 
-            handle.setOnTouchListener { _, event ->
-                when (event.actionMasked) {
-                    MotionEvent.ACTION_DOWN -> {
-                        dragId = id
-                        root.alpha = 0.55f
-                        root.parent?.requestDisallowInterceptTouchEvent(true)
-                        true
-                    }
-                    MotionEvent.ACTION_MOVE -> {
-                        val active = dragId ?: return@setOnTouchListener false
-                        val current = order.indexOf(active)
-                        val target = targetAt(event.rawY)
-                        if (current != target) moveTo(active, target, save = false)
-                        true
-                    }
-                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                        root.alpha = 1f
-                        root.parent?.requestDisallowInterceptTouchEvent(false)
-                        dragId = null
-                        persist()
-                        true
-                    }
-                    else -> false
+                val root = LinearLayout(ui.context).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(0, ui.dp(7), 0, ui.dp(7))
                 }
+                val top = LinearLayout(ui.context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                }
+                val handle = ui.textButton("≡", TEXT_FAINT, 20f) {}.apply {
+                    contentDescription = "Drag to reorder ${spec.name}"
+                    layoutParams = LinearLayout.LayoutParams(ui.dp(28), ui.dp(40))
+                }
+                top.addView(handle)
+                top.addView(ui.providerIcon(spec))
+                val texts = LinearLayout(ui.context).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(ui.dp(10), 0, ui.dp(8), 0)
+                    layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                }
+                val titleRow = LinearLayout(ui.context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                }
+                titleRow.addView(ui.label(spec.name, 14f, TEXT, medium = true))
+                val rank = ui.label("#${index + 1}", 10f, TEXT_FAINT, medium = true, spacing = 0.06f).apply {
+                    setPadding(ui.dp(7), 0, 0, 0)
+                }
+                titleRow.addView(rank)
+                texts.addView(titleRow)
+                texts.addView(
+                    ui.label("${spec.note} · ${category.short}", 11f, TEXT_FAINT).apply {
+                        setPadding(0, ui.dp(3), 0, 0)
+                        maxLines = 1
+                        ellipsize = TextUtils.TruncateAt.END
+                    },
+                )
+                top.addView(texts)
+                val toggle = ui.toggleControl(enabled.contains(id)) { on ->
+                    if (on) enabled += id else enabled -= id
+                    persist()
+                }
+                top.addView(toggle.view)
+                root.addView(top)
+
+                val maxScore = scoreFor(category, index)
+                val priorityRow = LinearLayout(ui.context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(ui.dp(38), ui.dp(5), 0, 0)
+                }
+                priorityRow.addView(
+                    ui.label("PRIORITY 1–${order.size}", 9f, TEXT_FAINT, medium = true, spacing = 0.12f),
+                )
+                priorityRow.addView(ui.spacer())
+                val down = ui.textButton("▾", TEXT_DIM, 18f) {
+                    applyScore(
+                        category,
+                        id,
+                        (scoreFor(category, order.indexOf(id)) - 1).coerceAtLeast(1).toString(),
+                    )
+                }.apply { contentDescription = "Lower ${spec.name} priority" }
+                val score = EditText(ui.context).apply {
+                    setText(maxScore.toString())
+                    setHint(maxScore.toString())
+                    setHintTextColor(TEXT_FAINT)
+                    setTextColor(TEXT)
+                    setSelectAllOnFocus(true)
+                    inputType = InputType.TYPE_CLASS_NUMBER
+                    typeface = Typeface.MONOSPACE
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                    gravity = Gravity.CENTER
+                    setPadding(0, 0, 0, 0)
+                    background = ui.inputBackground()
+                    layoutParams = LinearLayout.LayoutParams(ui.dp(54), ui.dp(36))
+                    setOnFocusChangeListener { _, focused ->
+                        if (!focused) applyScore(category, id, text.toString())
+                    }
+                    setOnEditorActionListener { _, actionId, event ->
+                        if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_DONE ||
+                            event?.keyCode == KeyEvent.KEYCODE_ENTER
+                        ) {
+                            applyScore(category, id, text.toString())
+                            clearFocus()
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                }
+                val up = ui.textButton("▴", TEXT_DIM, 18f) {
+                    applyScore(
+                        category,
+                        id,
+                        (scoreFor(category, order.indexOf(id)) + 1).coerceAtMost(order.size).toString(),
+                    )
+                }.apply { contentDescription = "Raise ${spec.name} priority" }
+                priorityRow.addView(down)
+                priorityRow.addView(score)
+                priorityRow.addView(up)
+                root.addView(priorityRow)
+
+                handle.setOnTouchListener { _, event ->
+                    when (event.actionMasked) {
+                        MotionEvent.ACTION_DOWN -> {
+                            dragId = id
+                            root.alpha = 0.55f
+                            root.parent?.requestDisallowInterceptTouchEvent(true)
+                            true
+                        }
+                        MotionEvent.ACTION_MOVE -> {
+                            val active = dragId ?: return@setOnTouchListener false
+                            val current = order.indexOf(active)
+                            val target = targetAt(container, event.rawY)
+                            if (current != target) moveTo(category, active, target, save = false)
+                            true
+                        }
+                        MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                            root.alpha = 1f
+                            root.parent?.requestDisallowInterceptTouchEvent(false)
+                            dragId = null
+                            persist()
+                            true
+                        }
+                        else -> false
+                    }
+                }
+                rows[id] = Row(root, rank, score)
+                container.addView(root)
             }
-            rows[id] = Row(root, rank, score)
-            container.addView(root)
         }
 
         refresh()
+        updateSummary()
         return { persist() }
     }
 
@@ -808,6 +881,9 @@ object SettingsUi {
         cacheCard.addView(ui.action("Clear caches", false) {
             LinkCache.clear()
             Tmdb.clearCache()
+            Omdb.clearCache()
+            Btttr.clearCache()
+            Tvdb.clearCache()
             StremioSource.clearCache()
             ui.toast("Caches cleared")
         })
@@ -832,7 +908,7 @@ object SettingsUi {
         })
         about.addView(
             ui.label(
-                "TMDB metadata · built-in servers · Stremio addons · custom templates",
+                "TMDB + TheTVDB metadata · btttr posters · built-in servers · Stremio addons · custom templates",
                 12f, TEXT_FAINT,
             ).apply { setPadding(0, ui.dp(4), 0, 0) },
         )
@@ -1097,6 +1173,37 @@ object SettingsUi {
 
         fun toggle(initial: Boolean, onChange: (Boolean) -> Unit): View =
             toggleControl(initial, onChange).view
+
+        fun providerIcon(spec: ServerSpec): View {
+            val fallback = monogram(spec.name)
+            val host = ServerFarm.faviconHost(spec) ?: return fallback
+            fallback.layoutParams = FrameLayout.LayoutParams(dp(34), dp(34))
+            val frame = FrameLayout(context).apply {
+                layoutParams = LinearLayout.LayoutParams(dp(34), dp(34))
+            }
+            frame.addView(fallback)
+            val image = ImageView(context).apply {
+                layoutParams = FrameLayout.LayoutParams(dp(34), dp(34))
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                setPadding(dp(5), dp(5), dp(5), dp(5))
+                clipToOutline = true
+                contentDescription = spec.name
+            }
+            frame.addView(image)
+            CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+                val url = "https://www.google.com/s2/favicons?sz=64&domain=" + Uri.encode(host)
+                val bytes = Http.request(url, mapOf("User-Agent" to Http.UA), 8)?.bytes
+                val bitmap = bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
+                if (bitmap != null) {
+                    withContext(Dispatchers.Main) {
+                        image.background = rounded(SURFACE_HIGH, 11)
+                        image.setImageBitmap(bitmap)
+                        fallback.visibility = View.GONE
+                    }
+                }
+            }
+            return frame
+        }
 
         fun monogram(value: String): TextView {
             val initials = value.split(' ', '-', '_')

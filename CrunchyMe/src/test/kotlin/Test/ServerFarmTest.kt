@@ -1,6 +1,7 @@
 package Test
 
 import com.crunchyme.LinkRequest
+import com.crunchyme.ServerCategory
 import com.crunchyme.ServerFarm
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -27,6 +28,18 @@ class ServerFarmTest {
         val ids = ServerFarm.all.map { it.id }
         assertEquals(26, ids.size)
         assertEquals(ids.size, ids.distinct().size)
+    }
+
+    @Test
+    fun providersAreGroupedIntoSections() {
+        val grouped = ServerCategory.values().associateWith { category ->
+            ServerFarm.inCategory(category).map { it.id }
+        }
+        assertEquals(ServerFarm.all.size, grouped.values.sumOf { it.size })
+        assertEquals(ServerFarm.all.map { it.id }.toSet(), grouped.values.flatten().toSet())
+        assertEquals(ServerCategory.STREAMING, ServerFarm.spec("vidlink")!!.category)
+        assertEquals(ServerCategory.FILE_INDEX, ServerFarm.spec("hdhub4u")!!.category)
+        assertEquals(ServerCategory.ANIMATION, ServerFarm.spec("hianime")!!.category)
     }
 
     @Test

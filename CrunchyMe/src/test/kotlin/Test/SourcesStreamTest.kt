@@ -6,6 +6,7 @@ import com.crunchyme.HttpEngine
 import com.crunchyme.HttpResult
 import com.crunchyme.LinkRequest
 import com.crunchyme.ProviderTemplate
+import com.crunchyme.ServerCategory
 import com.crunchyme.SourceConfig
 import com.crunchyme.Sources
 import java.util.concurrent.atomic.AtomicBoolean
@@ -27,6 +28,29 @@ class SourcesStreamTest {
         year = 2026,
         originalLanguage = "en",
     )
+
+    @Test
+    fun defaultWorkersSplitBySection() {
+        val animation = Sources.workerCounts(8, true, true, true)
+        assertEquals(2, animation[ServerCategory.STREAMING])
+        assertEquals(2, animation[ServerCategory.FILE_INDEX])
+        assertEquals(4, animation[ServerCategory.ANIMATION])
+
+        val noAnimation = Sources.workerCounts(8, true, true, false)
+        assertEquals(2, noAnimation[ServerCategory.STREAMING])
+        assertEquals(6, noAnimation[ServerCategory.FILE_INDEX])
+        assertEquals(0, noAnimation[ServerCategory.ANIMATION])
+
+        val six = Sources.workerCounts(6, true, true, true)
+        assertEquals(2, six[ServerCategory.STREAMING])
+        assertEquals(1, six[ServerCategory.FILE_INDEX])
+        assertEquals(3, six[ServerCategory.ANIMATION])
+
+        val ten = Sources.workerCounts(10, true, true, true)
+        assertEquals(2, ten[ServerCategory.STREAMING])
+        assertEquals(4, ten[ServerCategory.FILE_INDEX])
+        assertEquals(4, ten[ServerCategory.ANIMATION])
+    }
 
     @Test
     fun streamsPriorityOrderWithoutWaitingForSlowSources() = runBlocking {

@@ -6,6 +6,12 @@ import org.json.JSONObject
 
 enum class ServerKind { JSON, EMBED }
 
+enum class ServerCategory(val title: String, val short: String) {
+    STREAMING("Streaming", "stream"),
+    FILE_INDEX("File index", "file"),
+    ANIMATION("Anime & animation", "anime"),
+}
+
 enum class KeyType { TMDB, IMDB, TITLE }
 
 enum class ServerSpeed { VERY_FAST, FAST, NORMAL, SLOW }
@@ -27,6 +33,7 @@ data class ServerSpec(
     val supports4k: Boolean = false,
     val hasSubtitles: Boolean = false,
     val domainKey: String? = null,
+    val category: ServerCategory = ServerCategory.STREAMING,
 ) {
     val supportsTv: Boolean get() = tvUrl.isNotBlank()
 }
@@ -125,6 +132,7 @@ object ServerFarm {
             referer = "{base}/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
             timeoutSec = 45, note = "4K files", defaultEnabled = true,
             speed = ServerSpeed.SLOW, supports4k = true, domainKey = "4khdhub",
+            category = ServerCategory.FILE_INDEX,
         ),
         ServerSpec(
             id = "fsl", name = "FSLv1",
@@ -133,6 +141,7 @@ object ServerFarm {
             referer = "{base}/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
             timeoutSec = 60, note = "VegaMovies files", defaultEnabled = true,
             speed = ServerSpeed.SLOW, supports4k = true, domainKey = "vegamovies",
+            category = ServerCategory.FILE_INDEX,
         ),
         ServerSpec(
             id = "fsl2", name = "FSLv2",
@@ -141,6 +150,7 @@ object ServerFarm {
             referer = "{base}/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
             timeoutSec = 60, note = "RogMovies files", defaultEnabled = true,
             speed = ServerSpeed.SLOW, supports4k = true, domainKey = "rogmovies",
+            category = ServerCategory.FILE_INDEX,
         ),
         ServerSpec(
             id = "hindmoviez", name = "HindMoviez",
@@ -149,6 +159,7 @@ object ServerFarm {
             referer = "{base}/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
             timeoutSec = 60, note = "HindMovie files", defaultEnabled = true,
             speed = ServerSpeed.SLOW, domainKey = "hindmoviez",
+            category = ServerCategory.FILE_INDEX,
         ),
         ServerSpec(
             id = "hdhub4u", name = "HDHub4u",
@@ -157,6 +168,7 @@ object ServerFarm {
             referer = "{base}/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
             timeoutSec = 60, note = "HubCloud files", defaultEnabled = true,
             speed = ServerSpeed.SLOW, supports4k = true, domainKey = "hdhub4u",
+            category = ServerCategory.FILE_INDEX,
         ),
         ServerSpec(
             id = "moviesdrive", name = "MoviesDrive",
@@ -165,6 +177,7 @@ object ServerFarm {
             referer = "{base}/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
             timeoutSec = 60, note = "mdrive files", defaultEnabled = true,
             speed = ServerSpeed.SLOW, supports4k = true, domainKey = "moviesdrive",
+            category = ServerCategory.FILE_INDEX,
         ),
         ServerSpec(
             id = "bollyflix", name = "Bollyflix",
@@ -173,6 +186,7 @@ object ServerFarm {
             referer = "{base}/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
             timeoutSec = 60, note = "Bollywood & web series", defaultEnabled = true,
             speed = ServerSpeed.SLOW, supports4k = true, domainKey = "bollyflix",
+            category = ServerCategory.FILE_INDEX,
         ),
         ServerSpec(
             id = "multimovies", name = "MultiMovies",
@@ -181,6 +195,7 @@ object ServerFarm {
             referer = "{base}/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
             timeoutSec = 60, note = "Multi-source embeds", defaultEnabled = true,
             speed = ServerSpeed.SLOW, supports4k = true, domainKey = "multimovies",
+            category = ServerCategory.FILE_INDEX,
         ),
         ServerSpec(
             id = "vidout", name = "VidOut",
@@ -197,6 +212,7 @@ object ServerFarm {
             referer = "{base}/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
             timeoutSec = 60, note = "Driveseed files", defaultEnabled = true,
             speed = ServerSpeed.SLOW, supports4k = true, domainKey = "moviesmod",
+            category = ServerCategory.FILE_INDEX,
         ),
         ServerSpec(
             id = "movies4u", name = "Movies4u",
@@ -205,6 +221,7 @@ object ServerFarm {
             referer = "https://new8.movies4u.garden/", kind = ServerKind.JSON, keyType = KeyType.TITLE,
             timeoutSec = 60, note = "File index", defaultEnabled = false,
             speed = ServerSpeed.SLOW, supports4k = true,
+            category = ServerCategory.FILE_INDEX,
         ),
         ServerSpec(
             id = "animeworld", name = "AnimeWorld",
@@ -213,6 +230,7 @@ object ServerFarm {
             referer = "https://watchanimeworld.one/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
             timeoutSec = 40, note = "Anime", animeOnly = true,
             speed = ServerSpeed.NORMAL,
+            category = ServerCategory.ANIMATION,
         ),
         ServerSpec(
             id = "toonix", name = "Toonix",
@@ -221,6 +239,7 @@ object ServerFarm {
             referer = "https://toonix.bond/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
             timeoutSec = 40, note = "Cartoons & movies", defaultEnabled = true,
             speed = ServerSpeed.NORMAL, hasSubtitles = true,
+            category = ServerCategory.ANIMATION,
         ),
         ServerSpec(
             id = "toonix_anime", name = "Toonix Anime",
@@ -229,6 +248,7 @@ object ServerFarm {
             referer = "https://toonix.bond/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
             timeoutSec = 40, note = "Anime", animeOnly = true,
             speed = ServerSpeed.NORMAL, hasSubtitles = true,
+            category = ServerCategory.ANIMATION,
         ),
         ServerSpec(
             id = "hianime", name = "HiAnime",
@@ -237,10 +257,27 @@ object ServerFarm {
             referer = "https://hianime.at/", kind = ServerKind.EMBED, keyType = KeyType.TITLE,
             timeoutSec = 40, note = "Anime", animeOnly = true,
             speed = ServerSpeed.NORMAL,
+            category = ServerCategory.ANIMATION,
         ),
     )
 
     fun spec(id: String): ServerSpec? = all.firstOrNull { it.id == id }
+
+    fun categoryOf(id: String): ServerCategory =
+        spec(id)?.category ?: ServerCategory.STREAMING
+
+    fun inCategory(category: ServerCategory): List<ServerSpec> =
+        all.filter { it.category == category }
+
+    fun faviconHost(spec: ServerSpec): String? {
+        val raw = spec.referer?.takeIf { it.startsWith("http") }
+            ?: spec.movieUrl.takeIf { it.startsWith("http") }
+            ?: return null
+        val filled = raw.replace("{base}", ProviderDomains.fallback(spec.domainKey))
+        return runCatching { java.net.URI(filled).host }.getOrNull()
+            ?.removePrefix("www.")
+            ?.takeIf { it.isNotBlank() }
+    }
 
     fun defaultEnabledIds(): Set<String> =
         all.filter { it.defaultEnabled }.map { it.id }.toSet()

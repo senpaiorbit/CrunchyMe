@@ -59,6 +59,7 @@ object Tmdb {
         val numberOfSeasons: Int,
         val logo: String? = null,
         val trailer: String? = null,
+        val tvdbId: Int? = null,
     )
 
     data class Ep(
@@ -164,9 +165,11 @@ object Tmdb {
         }
         val score = json.optDouble("vote_average", 0.0).takeIf { it > 0.0 }
         val genres = json.optJSONArray("genres").names("name")
-        val imdb = json.optJSONObject("external_ids")
+        val external = json.optJSONObject("external_ids")
+        val imdb = external
             ?.optString("imdb_id")
             ?.takeIf { it.startsWith("tt") }
+        val tvdbId = external?.optInt("tvdb_id", 0)?.takeIf { it > 0 }
         val cast = json.optJSONObject("credits")
             ?.optJSONArray("cast")
             ?.let { array ->
@@ -243,6 +246,7 @@ object Tmdb {
             numberOfSeasons = json.optInt("number_of_seasons", seasonNumbers.size),
             logo = logo,
             trailer = trailer,
+            tvdbId = tvdbId,
         )
     }
 
