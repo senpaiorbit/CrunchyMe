@@ -2,6 +2,9 @@ package com.crunchyme
 
 import java.net.URLDecoder
 import java.net.URLEncoder
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import org.json.JSONObject
 import org.jsoup.Jsoup
 
@@ -129,13 +132,16 @@ object Fsl {
         if (FASTDL.containsMatchIn(gateway)) return fastdl(gateway)
         if (gateway.contains("vcloud.", true)) return vcloud(gateway)
         val page = Http.text(gateway, ProviderSupport.headers(referer), 15) ?: return emptyList()
-        val out = mutableListOf<String>()
-        val cloud = VCLOUD.findAll(page).map { it.value }.distinct().take(3)
-        for (url in cloud) out += vcloud(url)
+        val cloud = VCLOUD.findAll(page).map { it.value }.distinct().take(2).toList()
         val fast = FASTDL.findAll(page).map { it.value }
             .map { if (it.startsWith("http")) it else "https://$it" }
-            .distinct().toList()
-        for (embed in fast) out += fastdl(embed)
+            .distinct().take(2).toList()
+        // V-Cloud and fastdl are independent; do not make one wait for the other.
+        val out = coroutineScope {
+            val cloudJobs = cloud.map { async { vcloud(it) } }
+            val fastJobs = fast.map { async { fastdl(it) } }
+            (cloudJobs.awaitAll() + fastJobs.awaitAll()).flatten()
+        }.toMutableList()
         if (out.isEmpty() && GATEWAY.containsMatchIn(gateway)) {
             out += FileIndex.resolveLink(spec, gateway, referer, request, "", 1).map { it.url }
         }

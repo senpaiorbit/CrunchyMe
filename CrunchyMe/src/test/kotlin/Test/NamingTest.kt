@@ -53,6 +53,15 @@ class NamingTest {
     }
 
     @Test
+    fun prefersEnglishWhenOneValueIsJapanese() {
+        assertEquals("Attack on Titan", Naming.preferEnglish("進撃の巨人", "Attack on Titan"))
+        assertEquals("Attack on Titan", Naming.preferEnglish("Attack on Titan", "進撃の巨人"))
+        assertEquals("進撃の巨人", Naming.preferEnglish("進撃の巨人", "進撃の巨人"))
+        assertEquals("English", Naming.preferEnglish("English", null))
+        assertEquals("English", Naming.preferEnglish(null, "English"))
+    }
+
+    @Test
     fun buildsLinkLabel() {
         assertEquals("1080p · Hindi · 2.4 GB", Naming.linkLabel(1080, "Hindi", "2.4 GB"))
         assertEquals("720p · Hindi", Naming.linkLabel(720, "Hindi", ""))

@@ -42,7 +42,9 @@ git push -u origin main
 
 The first workflow run creates the `builds` branch and publishes the artifacts.
 Each CI build uses the workflow run number as the plugin version, and the published plugin URL
-includes a build tag. That prevents an update from reusing a stale cached `.cs3` file.
+includes a build tag. Plugin downloads use `github.com/<repo>/raw/...` rather than
+`raw.githubusercontent.com`, so CloudStream's optional jsDelivr proxy cannot serve an old cached
+`.cs3` whose bytes no longer match `fileHash`.
 
 ## First run: add a TMDB key
 
@@ -105,9 +107,11 @@ bundled into the plugin and never sent anywhere except `api.themoviedb.org`.
 - **TheTVDB v4** is used for TV episode metadata. The provider reads the TVDB id from TMDB
   `external_ids`, then falls back to a TVDB remote-id search by TMDB or IMDb id. Series and episode
   requests use the `eng` translation, so anime titles do not fall back to Japanese names and
-  overviews. If TheTVDB has no series, translation or episode data, the TMDB/OMDb episode list is
-  used unchanged. Episodes are always grouped by a positive season number, so single-season and
-  absolute-numbered shows still render as a season instead of one flat stack.
+  overviews. TMDB's `en-US` title is preferred; when it is still CJK, the provider uses TMDB's
+  English translation or the TVDB English value. If TheTVDB has no series, translation or episode
+  data, the TMDB/OMDb episode list is used unchanged. Episodes are always grouped by a positive
+  season number, so single-season and absolute-numbered shows still render as a season instead of
+  one flat stack.
 - **BetterPosters (btttr.cc)** is off by default. When enabled, the meta endpoint accepts
   `tmdb:<id>`, so cards do not need an extra IMDb lookup. If btttr has no artwork, the TMDB/OMDb
   poster is used.
@@ -287,6 +291,9 @@ private object MySource {
   file index gets 6 workers.
 - **Per-source timeouts** (45 s farm, 12 s per addon, 6–20 s per HTTP call) and a circuit breaker
   that disables a source after four consecutive failures for five minutes.
+- **Fewer duplicate requests.** FSL expands V-Cloud and fastdl concurrently, candidates are probed
+  once instead of retrying the whole batch when a quality floor hides them, and OkHttp reuses one
+  client/connection pool instead of rebuilding a client for every request.
 - **Caching**: TMDB 15 min, resolved links 2 min (signed MovieBox URLs expire quickly), addon manifests 6 h. Re-opening an episode is
   instant and does not re-hit the network.
 - **Declared evidence only.** Audio languages come from names, native scripts, ISO codes or

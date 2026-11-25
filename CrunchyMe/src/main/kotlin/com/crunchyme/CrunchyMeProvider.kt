@@ -175,11 +175,11 @@ class CrunchyMeProvider : MainAPI() {
         } else {
             null
         }
-        val title = tvdb?.name ?: detail.title
+        val title = Naming.preferEnglish(detail.title, tvdb?.name) ?: detail.title
         val poster = btttr?.poster ?: tvdb?.image ?: detail.poster
         val backdrop = btttr?.background ?: detail.backdrop
         val logo = btttr?.logo ?: detail.logo
-        val displayPlot = tvdb?.overview ?: detail.overview
+        val displayPlot = Naming.preferEnglish(detail.overview, tvdb?.overview)
         val displayYear = tvdb?.year ?: detail.year
         val displayRuntime = tvdb?.runtime ?: detail.runtime
         val trailers = trailerVariants(detail.trailer, btttr?.trailers)
@@ -263,8 +263,8 @@ class CrunchyMeProvider : MainAPI() {
             rows[season to number] = EpisodeRow(
                 season = season,
                 number = number,
-                name = extra?.name ?: ep.name,
-                overview = extra?.overview ?: ep.overview,
+                name = Naming.preferEnglish(ep.name, extra?.name),
+                overview = Naming.preferEnglish(ep.overview, extra?.overview),
                 still = extra?.still ?: ep.still,
                 airDate = extra?.airDate ?: ep.airDate,
                 runtime = extra?.runtime ?: ep.runtime,
@@ -325,14 +325,14 @@ class CrunchyMeProvider : MainAPI() {
         }
         val poster = btttr?.poster ?: Btttr.posterByImdb(detail.imdbId, detail.type)
             ?: tvdb?.image ?: detail.poster
-        val title = tvdb?.name ?: detail.title
+        val title = Naming.preferEnglish(detail.title, tvdb?.name) ?: detail.title
         val trailers = trailerVariants(null, btttr?.trailers)
         if (detail.type == "movie") {
             return newMovieLoadResponse(title, url, TvType.Movie, dataUrl) {
                 posterUrl = poster
                 backgroundPosterUrl = btttr?.background ?: detail.poster
                 year = tvdb?.year ?: detail.year
-                plot = tvdb?.overview ?: detail.overview
+                plot = Naming.preferEnglish(detail.overview, tvdb?.overview)
                 tags = detail.genres
                 actors = cast
                 duration = tvdb?.runtime ?: detail.runtime
@@ -386,7 +386,7 @@ class CrunchyMeProvider : MainAPI() {
             posterUrl = poster
             backgroundPosterUrl = btttr?.background ?: detail.poster
             year = tvdb?.year ?: detail.year
-            plot = tvdb?.overview ?: detail.overview
+            plot = Naming.preferEnglish(detail.overview, tvdb?.overview)
             tags = detail.genres
             actors = cast
             duration = tvdb?.runtime ?: detail.runtime
@@ -504,7 +504,6 @@ class CrunchyMeProvider : MainAPI() {
             Sources.stream(request, config) { _, raw ->
                 jobs += launch {
                     val enriched = enrich(raw, floor, probeGate)
-                        .ifEmpty { enrich(raw, 0, probeGate) }
                     if (enriched.isEmpty()) return@launch
                     collected.addAll(enriched)
                     emitGate.withLock {
@@ -536,19 +535,20 @@ class CrunchyMeProvider : MainAPI() {
         gate: Semaphore = Semaphore(6),
     ): List<Candidate> =
         coroutineScope {
-            candidates.distinctBy { it.url }.take(32).map { candidate ->
+            val probed = candidates.distinctBy { it.url }.take(32).map { candidate ->
                 async {
                     gate.withPermit {
-                        runCatching { MediaProbe.enrich(candidate, floor) }.getOrElse { candidate }
+                        runCatching { MediaProbe.enrich(candidate, 0) }.getOrElse { candidate }
                     }
                 }
             }.awaitAll()
                 .filterNotNull()
                 .distinctBy { it.url }
-                .sortedWith(
-                    compareByDescending<Candidate> { it.qualityHint }
-                        .thenBy { it.sourceName },
-                )
+            val filtered = probed.filter { floor <= 0 || it.qualityHint <= 0 || it.qualityHint >= floor }
+            (filtered.ifEmpty { probed }).sortedWith(
+                compareByDescending<Candidate> { it.qualityHint }
+                    .thenBy { it.sourceName },
+            )
         }
 
     private fun Omdb.Hit.toCard(): SearchResponse {

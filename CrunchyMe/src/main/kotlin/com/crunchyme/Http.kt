@@ -63,10 +63,9 @@ object OkHttpEngine : HttpEngine {
                 }
             }
             if (!range.isNullOrBlank()) builder.header("Range", range)
-            val callClient = client.newBuilder()
-                .callTimeout(timeoutSec.coerceIn(3, 60), TimeUnit.SECONDS)
-                .build()
-            callClient.newCall(builder.build()).execute().use { response ->
+            val call = client.newCall(builder.build())
+            call.timeout().timeout(timeoutSec.coerceIn(3, 60), TimeUnit.SECONDS)
+            call.execute().use { response ->
                 val raw = response.body.byteStream().use { stream ->
                     Http.readLimited(stream, Http.responseLimit(range))
                 }
@@ -99,10 +98,9 @@ object OkHttpEngine : HttpEngine {
             headers.forEach { (key, value) ->
                 if (key.isNotBlank() && value.isNotBlank()) builder.header(key, value)
             }
-            val callClient = client.newBuilder()
-                .callTimeout(timeoutSec.coerceIn(3, 60), TimeUnit.SECONDS)
-                .build()
-            callClient.newCall(builder.build()).execute().use { response ->
+            val call = client.newCall(builder.build())
+            call.timeout().timeout(timeoutSec.coerceIn(3, 60), TimeUnit.SECONDS)
+            call.execute().use { response ->
                 val raw = response.body.byteStream().use { stream ->
                     Http.readLimited(stream, Http.responseLimit(null))
                 }

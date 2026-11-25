@@ -151,10 +151,29 @@ object Tmdb {
 
     suspend fun detail(id: Int, type: String): Detail? {
         val path = if (type == "movie") "/movie/$id" else "/tv/$id"
-        val json = get(path, mapOf("append_to_response" to "external_ids,credits,images,videos")) ?: return null
+        val json = get(
+            path,
+            mapOf("append_to_response" to "external_ids,credits,images,videos,translations"),
+        ) ?: return null
 
         val isMovie = type == "movie"
-        val title = if (isMovie) json.optString("title") else json.optString("name")
+        val translation = json.optJSONObject("translations")
+            ?.optJSONArray("translations")
+            ?.let { translations ->
+                (0 until translations.length()).mapNotNull { index ->
+                    translations.optJSONObject(index)
+                }.firstOrNull { it.optString("iso_639_1").equals("en", true) }
+                    ?.optJSONObject("data")
+            }
+        val translatedTitle = if (isMovie) {
+            translation?.optString("title")
+        } else {
+            translation?.optString("name")
+        }
+        val title = Naming.preferEnglish(
+            if (isMovie) json.optString("title") else json.optString("name"),
+            translatedTitle,
+        ).orEmpty()
         if (title.isBlank()) return null
 
         val date = if (isMovie) json.optString("release_date") else json.optString("first_air_date")
@@ -232,7 +251,10 @@ object Tmdb {
             id = id,
             type = type,
             title = title,
-            overview = json.optString("overview").trim().ifBlank { null },
+            overview = Naming.preferEnglish(
+                json.optString("overview"),
+                translation?.optString("overview"),
+            ),
             poster = image(json.optString("poster_path")),
             backdrop = imageBig(json.optString("backdrop_path")),
             year = date.take(4).toIntOrNull(),

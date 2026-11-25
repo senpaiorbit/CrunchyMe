@@ -55,6 +55,14 @@ class LiveTmdbTest {
     }
 
     @Test
+    fun animeDetailUsesEnglishMetadata() = runBlocking {
+        requireKey()
+        val detail = assertNotNull(Tmdb.detail(1429, "tv"))
+        assertEquals("Attack on Titan", detail.title)
+        assertTrue(detail.overview?.contains("humanity", true) == true)
+    }
+
+    @Test
     fun rowsReturnCards() = runBlocking {
         requireKey()
         val trending = assertNotNull(Tmdb.row("trending_movie", 1))

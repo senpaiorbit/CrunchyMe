@@ -363,4 +363,19 @@ object Naming {
         if (value.isBlank()) return "Subtitle"
         return languages(value).firstOrNull() ?: value
     }
+
+    private val CJK = Regex("""[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af\uff66-\uff9f]""")
+
+    /**
+     * Prefer the Latin/English value when a localized source returns Japanese,
+     * Chinese or Korean text. This keeps TMDB's en-US title when TVDB has no
+     * English translation, while still using TVDB when TMDB is the localized one.
+     */
+    fun preferEnglish(primary: String?, fallback: String?): String? {
+        val first = primary?.trim()?.takeIf { it.isNotEmpty() }
+        val second = fallback?.trim()?.takeIf { it.isNotEmpty() }
+        if (first == null) return second
+        if (second == null) return first
+        return if (CJK.containsMatchIn(first) && !CJK.containsMatchIn(second)) second else first
+    }
 }
